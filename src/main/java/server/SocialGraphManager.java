@@ -10,7 +10,7 @@ import java.util.Scanner;
 public class SocialGraphManager {
     private static SocialGraphManager instance = null;
 
-    // Maps client IDs to their set of followers.
+    // Maps client IDs to sets of follower IDs.
     private HashMap<String, Set<String>> socialGraph = new HashMap<>();
 
     private SocialGraphManager() {}
@@ -22,7 +22,7 @@ public class SocialGraphManager {
         return instance;
     }
 
-    // Loads the social graph from the provided file.
+    // Load the social graph from a file.
     public void loadSocialGraph(String filename) {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
@@ -48,7 +48,7 @@ public class SocialGraphManager {
         return followers != null && followers.contains(requesterId);
     }
 
-    // Processes follow requests.
+    // Process a follow request.
     public void handleFollow(Message msg) {
         String targetId = msg.getPayload();
         String requesterId = msg.getSenderId();
@@ -57,7 +57,7 @@ public class SocialGraphManager {
         System.out.println("Client " + requesterId + " now follows " + targetId);
     }
 
-    // Processes unfollow requests.
+    // Process an unfollow request.
     public void handleUnfollow(Message msg) {
         String targetId = msg.getPayload();
         String requesterId = msg.getSenderId();
@@ -68,9 +68,13 @@ public class SocialGraphManager {
         }
     }
 
-    // Simulated search: returns a dummy client ID who has the photo.
+    // Search for a photo by checking if it exists in the ServerFiles directory.
     public String searchPhoto(String photoName, String requesterId) {
-        // In a full implementation, search through directories in the social graph.
-        return "Found photo " + photoName + " at clientID 1";
+        File file = new File("ServerFiles/" + photoName);
+        if (file.exists()) {
+            return "Found photo " + photoName + " at clientID dummyOwner";
+        } else {
+            return "Photo " + photoName + " not found.";
+        }
     }
 }

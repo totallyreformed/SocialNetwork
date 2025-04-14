@@ -14,7 +14,6 @@ public class ProfileClientManager {
         this.profileFileName = "Profile_Client_" + clientId + ".txt";
     }
 
-    // Append a new post to the local profile file.
     public void appendPost(String post) {
         try (FileWriter fw = new FileWriter(new File(profileFileName), true)) {
             fw.write(post + "\n");
@@ -24,7 +23,6 @@ public class ProfileClientManager {
         }
     }
 
-    // Read the current content of the local profile.
     public String readProfile() {
         try {
             return new String(Files.readAllBytes(new File(profileFileName).toPath()));

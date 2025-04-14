@@ -12,7 +12,7 @@ import java.io.FileInputStream;
 
 public class FileManager {
 
-    // Process file upload: payload format is "photoName:<name>|caption:<text>|data:<base64Data>"
+    // Handles file upload. Expected payload format: "photoName:<name>|caption:<text>|data:<base64Data>"
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         String payload = msg.getPayload();
         String[] parts = payload.split("\\|");
@@ -28,24 +28,23 @@ public class FileManager {
                 base64Data = part.substring("data:".length());
         }
         try {
-            // For simulation, write photo data to file.
+            // Ensure server file directory exists.
             File dir = new File("ServerFiles");
             if (!dir.exists()) dir.mkdirs();
             File photoFile = new File(dir, photoName);
 
-            // In a real implementation, decode base64Data to bytes.
-            // Here we simply simulate by writing the string.
+            // In a full implementation, decode base64Data into bytes.
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(base64Data.getBytes());
             }
 
-            // Save caption to a .txt file with same name (or with a fixed convention)
+            // Save caption in a corresponding .txt file.
             File captionFile = new File(dir, photoName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
                 fos.write(caption.getBytes());
             }
 
-            // Update the profile (append a new post)
+            // Update client's profile.
             ProfileManager.getInstance().updateProfile(clientId, clientId + " posted " + photoName);
 
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Upload successful for " + photoName));
@@ -55,10 +54,17 @@ public class FileManager {
         }
     }
 
-    // Process file search: For simplicity, return a dummy client ID.
+    // Handles file search requests. This simulated implementation checks if the file exists.
     public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {
         String photoName = msg.getPayload();
-        String result = SocialGraphManager.getInstance().searchPhoto(photoName, clientId);
+        File file = new File("ServerFiles/" + photoName);
+        String result;
+        if (file.exists()) {
+            // In a complete implementation, return the client id(s) that own the file.
+            result = "Found photo " + photoName + " at clientID dummyOwner";
+        } else {
+            result = "Photo " + photoName + " not found.";
+        }
         try {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", result));
             output.flush();
@@ -67,8 +73,7 @@ public class FileManager {
         }
     }
 
-    // Process file download with a simulated handshake and stop-and-wait protocol.
-    // The input stream is used to wait for handshake ACK messages.
+    // Handles file download using a simulated 3-way handshake and stop-and-wait protocol.
     public static void handleDownload(Message msg, String clientId, ObjectInputStream input, ObjectOutputStream output) {
         String photoName = msg.getPayload();
         File dir = new File("ServerFiles");
@@ -86,7 +91,7 @@ public class FileManager {
             output.flush();
             System.out.println("Sent handshake for " + photoName);
 
-            // Step 2: Wait for client's ACK for handshake.
+            // Step 2: Wait for handshake ACK.
             Message ackMsg = (Message) input.readObject();
             if (ackMsg.getType() != MessageType.ACK || !ackMsg.getPayload().contains("handshake")) {
                 output.writeObject(new Message(MessageType.NACK, "Server", "Handshake failed."));
@@ -95,52 +100,70 @@ public class FileManager {
             }
             System.out.println("Received handshake ACK from client.");
 
-            // Step 3: Read file bytes (simulate segmentation into NUM_CHUNKS chunks).
+            // Step 3: Read file into memory.
             byte[] fileData = new byte[(int) photoFile.length()];
             try (FileInputStream fis = new FileInputStream(photoFile)) {
                 fis.read(fileData);
             }
             int totalLength = fileData.length;
+            // For simplicity, calculate chunk size to simulate NUM_CHUNKS.
             int chunkSize = totalLength / Constants.NUM_CHUNKS;
-            if (chunkSize == 0) chunkSize = totalLength; // small file
+            if (chunkSize == 0) chunkSize = totalLength;
 
-            // For simulation, we send NUM_CHUNKS chunks.
+            // For each simulated chunk.
             for (int i = 1; i <= Constants.NUM_CHUNKS; i++) {
-                // Determine start and end index (simulate last chunk may be longer)
                 int start = (i - 1) * chunkSize;
                 int end = (i == Constants.NUM_CHUNKS) ? totalLength : i * chunkSize;
                 String chunkContent = new String(fileData, start, end - start);
-
-                // Create a file chunk message.
                 Message chunkMsg = new Message(MessageType.FILE_CHUNK, "Server", "Chunk " + i + ": " + chunkContent);
 
-                // For chunk 3 and 6, simulate delay and retransmission.
+                boolean ackReceived = false;
+                int attempts = 0;
+                int maxAttempts = 3;
+
+                // For chunks 3 and 6, simulate retransmission.
                 if (i == 3 || i == 6) {
-                    output.writeObject(chunkMsg);
-                    output.flush();
-                    System.out.println("Sent chunk " + i + " (deliberate delay simulated). Waiting for ACK...");
-
-                    // Simulate waiting period (beyond timeout).
-                    Thread.sleep(Constants.TIMEOUT_MILLISECONDS + 500);
-                    // In a real scenario, no ACK would be received, so server retransmits.
-                    System.out.println("Timeout reached for chunk " + i + ". Retransmitting chunk " + i + ".");
-                    output.writeObject(chunkMsg);
-                    output.flush();
+                    while (!ackReceived && attempts < maxAttempts) {
+                        output.writeObject(chunkMsg);
+                        output.flush();
+                        System.out.println("Sent chunk " + i + " (attempt " + (attempts+1) + "). Waiting for ACK...");
+                        // Simulate delay exceeding timeout.
+                        Thread.sleep(Constants.TIMEOUT_MILLISECONDS + 500);
+                        // Try to read an ACK for this chunk.
+                        Message ackChunk = (Message) input.readObject();
+                        if (ackChunk.getType() == MessageType.ACK &&
+                                ackChunk.getPayload().contains("Chunk " + i)) {
+                            ackReceived = true;
+                            System.out.println("Received ACK for chunk " + i);
+                        } else {
+                            System.out.println("Did not receive proper ACK for chunk " + i);
+                            attempts++;
+                        }
+                    }
+                    if (!ackReceived) {
+                        System.out.println("Max retransmission reached for chunk " + i + ". Aborting download.");
+                        output.writeObject(new Message(MessageType.NACK, "Server", "Download aborted at chunk " + i));
+                        output.flush();
+                        return;
+                    }
                 } else {
+                    // For other chunks, send once and wait for immediate ACK.
                     output.writeObject(chunkMsg);
                     output.flush();
-                }
-
-                // Simulate stop-and-wait: wait for an ACK for this chunk.
-                Message ackChunk = (Message) input.readObject();
-                if (ackChunk.getType() != MessageType.ACK) {
-                    System.out.println("Did not receive proper ACK for chunk " + i);
-                } else {
-                    System.out.println("Received ACK for chunk " + i);
+                    Message ackChunk = (Message) input.readObject();
+                    if (ackChunk.getType() == MessageType.ACK &&
+                            ackChunk.getPayload().contains("Chunk " + i)) {
+                        System.out.println("Received ACK for chunk " + i);
+                    } else {
+                        System.out.println("Did not receive proper ACK for chunk " + i + ". Aborting download.");
+                        output.writeObject(new Message(MessageType.NACK, "Server", "Download aborted at chunk " + i));
+                        output.flush();
+                        return;
+                    }
                 }
             }
 
-            // Send final message indicating completion.
+            // Send final message.
             output.writeObject(new Message(MessageType.FILE_END, "Server", "Transmission completed for " + photoName));
             output.flush();
             System.out.println("File download completed for " + photoName);

@@ -21,12 +21,12 @@ public class ServerMain {
             // Load the initial social graph.
             SocialGraphManager.getInstance().loadSocialGraph("src/SocialGraph.txt");
 
-            // Accept clients continuously.
+            // Continuously accept client connections.
             while (true) {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("New client connected: " + clientSocket.getInetAddress());
 
-                // Create a new ClientHandler for this connection.
+                // Create and submit a ClientHandler for each connected client.
                 ClientHandler handler = new ClientHandler(clientSocket);
                 threadPool.submit(handler);
             }

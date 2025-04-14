@@ -10,13 +10,13 @@ public class ServerConnection {
     private Socket socket;
     private ObjectOutputStream output;
     private ObjectInputStream input;
+    private String clientId = "clientID_placeholder"; // Updated after successful auth.
 
     public boolean connect() {
         try {
             socket = new Socket("localhost", Constants.SERVER_PORT);
             output = new ObjectOutputStream(socket.getOutputStream());
             input = new ObjectInputStream(socket.getInputStream());
-            // Start a listener thread for incoming messages.
             new Thread(new ServerListener(input, this)).start();
             return true;
         } catch (IOException e) {
@@ -38,8 +38,16 @@ public class ServerConnection {
         return output;
     }
 
-    // For direct access by FileTransferHandler during synchronous transfer.
     public ObjectInputStream getInputStream() {
         return input;
+    }
+
+    public String getClientId() {
+        return clientId;
+    }
+
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
+        System.out.println("Session updated: clientId is now " + clientId);
     }
 }

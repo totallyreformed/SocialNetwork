@@ -12,13 +12,22 @@ public class FileSyncManager {
         this.localDirectory = localDirectory;
     }
 
-    // Synchronizes the local directory with the server's directory.
+    // Lists files in the local directory.
     public void synchronize() {
         System.out.println("Synchronizing local directory: " + localDirectory);
-        // Implementation: compare files and update as needed.
+        File folder = new File(localDirectory);
+        File[] listOfFiles = folder.listFiles();
+        if (listOfFiles != null) {
+            System.out.println("Local files:");
+            for (File file : listOfFiles) {
+                if (file.isFile()) {
+                    System.out.println(file.getName());
+                }
+            }
+        }
     }
 
-    // Start a file watcher to monitor local changes.
+    // Starts a watcher to detect changes.
     public void startWatcher() {
         Path path = Paths.get(localDirectory);
         try {
@@ -32,7 +41,8 @@ public class FileSyncManager {
                         WatchKey key = watchService.take();
                         for (WatchEvent<?> event : key.pollEvents()) {
                             System.out.println("Detected change: " + event.context());
-                            // Trigger synchronization if necessary.
+                            // Trigger synchronization if needed.
+                            synchronize();
                         }
                         key.reset();
                     } catch (InterruptedException e) {

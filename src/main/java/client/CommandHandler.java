@@ -23,32 +23,27 @@ public class CommandHandler {
     }
 
     private void processCommand(String input) {
-        // Format: command [payload]
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
         String payload = parts.length > 1 ? parts[1] : "";
-
-        // For simplicity, the clientId is included in the payload for signup/login.
-        // For other commands, we assume the client has already logged in.
-        String clientId = "clientID_placeholder";
+        String clientId = connection.getClientId();  // Use the session client id.
 
         switch (command) {
             case "signup":
-                // Expected payload: "clientId:password"
+                // Expected: "clientId:password"
                 connection.sendMessage(new Message(MessageType.SIGNUP, clientId, payload));
                 break;
             case "login":
-                // Expected payload: "clientId:password"
+                // Expected: "clientId:password"
                 connection.sendMessage(new Message(MessageType.LOGIN, clientId, payload));
                 break;
             case "upload":
-                // Expected payload: "photoName:<name>|caption:<text>|data:<dataString>"
+                // Expected: "photoName:<name>|caption:<text>|data:<dataString>"
                 connection.sendMessage(new Message(MessageType.UPLOAD, clientId, payload));
                 break;
             case "download":
-                // Expected payload: photoName
+                // Expected: photoName
                 connection.sendMessage(new Message(MessageType.DOWNLOAD, clientId, payload));
-                // Initiate file transfer handling on the client side.
                 FileTransferHandler.downloadFile(payload, connection);
                 break;
             case "search":
