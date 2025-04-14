@@ -12,59 +12,78 @@ public class ClientHandler implements Runnable {
     private Socket clientSocket;
     private ObjectInputStream input;
     private ObjectOutputStream output;
-    private String clientId;
 
-    // Static map to track active clients by their clientId.
+    // Internal numeric client id (as a String) assigned upon successful signup or login.
+    private String clientId;
+    // The username provided by the user.
+    private String username;
+
+    // Map of active client connections, keyed by the numeric client id.
     public static ConcurrentHashMap<String, ClientHandler> activeClients = new ConcurrentHashMap<>();
 
     public ClientHandler(Socket socket) {
         this.clientSocket = socket;
+        System.out.println("ClientHandler: New instance created for socket " + socket.getInetAddress());
     }
 
     @Override
     public void run() {
         try {
-            // Set up object streams.
             output = new ObjectOutputStream(clientSocket.getOutputStream());
             input = new ObjectInputStream(clientSocket.getInputStream());
+            System.out.println("ClientHandler: Streams established.");
 
             Message msg;
             while ((msg = (Message) input.readObject()) != null) {
-                System.out.println("Received: " + msg);
+                System.out.println("ClientHandler: Received message: " + msg);
                 handleMessage(msg);
             }
         } catch (IOException | ClassNotFoundException e) {
-            System.out.println("Client disconnected or error: " + e.getMessage());
+            System.out.println("ClientHandler: Error or disconnection: " + e.getMessage());
         } finally {
-            try {
-                if (clientSocket != null)
-                    clientSocket.close();
-            } catch (IOException e) { }
+            try { if (clientSocket != null) clientSocket.close(); } catch (IOException e) { }
+            System.out.println("ClientHandler: Socket closed for client " + clientId);
         }
     }
 
     private void handleMessage(Message msg) {
         switch (msg.getType()) {
             case SIGNUP:
-                // Expected payload: "clientId:password"
+                // Payload format: "username:password"
                 String[] signupParts = msg.getPayload().split(":");
-                if (signupParts.length == 2 && AuthenticationManager.signup(signupParts[0], signupParts[1])) {
-                    clientId = signupParts[0];
-                    activeClients.put(clientId, this);
-                    sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Welcome " + clientId));
+                if (signupParts.length == 2) {
+                    String providedUsername = signupParts[0];
+                    String password = signupParts[1];
+                    String newClientId = AuthenticationManager.signup(providedUsername, password);
+                    if (newClientId != null) {
+                        clientId = newClientId;
+                        username = providedUsername;
+                        activeClients.put(clientId, this);
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Your client id is " + clientId));
+                    } else {
+                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Username already exists."));
+                    }
                 } else {
-                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed for payload: " + msg.getPayload()));
+                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Invalid format. Use username:password."));
                 }
                 break;
             case LOGIN:
-                // Expected payload: "clientId:password"
+                // Payload format: "username:password"
                 String[] loginParts = msg.getPayload().split(":");
-                if (loginParts.length == 2 && AuthenticationManager.login(loginParts[0], loginParts[1])) {
-                    clientId = loginParts[0];
-                    activeClients.put(clientId, this);
-                    sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + clientId));
+                if (loginParts.length == 2) {
+                    String providedUsername = loginParts[0];
+                    String password = loginParts[1];
+                    String loginClientId = AuthenticationManager.login(providedUsername, password);
+                    if (loginClientId != null) {
+                        clientId = loginClientId;
+                        username = providedUsername;
+                        activeClients.put(clientId, this);
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + clientId));
+                    } else {
+                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Incorrect credentials."));
+                    }
                 } else {
-                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed for payload: " + msg.getPayload()));
+                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Invalid format. Use username:password."));
                 }
                 break;
             case UPLOAD:
@@ -85,27 +104,30 @@ public class ClientHandler implements Runnable {
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);
                 break;
+            case REPOST:
+                ProfileManager.handleRepost(msg, clientId, output);
+                break;
             default:
                 sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
                 break;
         }
     }
 
-    // Provide a method to get the clientId.
-    public ObjectOutputStream getOutputStream() {
-        return output;
-    }
-
     private void sendMessage(Message msg) {
         try {
             output.writeObject(msg);
             output.flush();
+            System.out.println("ClientHandler: Sent message: " + msg);
         } catch (IOException e) {
-            System.out.println("Error sending message to client " + clientId + ": " + e.getMessage());
+            System.out.println("ClientHandler: Error sending message to client " + clientId + ": " + e.getMessage());
         }
     }
 
-    // Provide a method to send messages externally (used by ProfileManager notifications).
+    // Expose output stream for notifications.
+    public ObjectOutputStream getOutputStream() {
+        return output;
+    }
+
     public void sendExternalMessage(Message msg) {
         sendMessage(msg);
     }

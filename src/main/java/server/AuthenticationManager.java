@@ -1,24 +1,68 @@
 package server;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
+// Helper class to hold user data.
+class ClientRecord {
+    String username;
+    String password;
+    String numericId; // Auto-generated numeric id as a string.
+
+    public ClientRecord(String username, String password, String numericId) {
+        this.username = username;
+        this.password = password;
+        this.numericId = numericId;
+    }
+}
 
 public class AuthenticationManager {
-    private static ConcurrentHashMap<String, String> registeredClients = new ConcurrentHashMap<>();
+    // Map from username to ClientRecord.
+    private static ConcurrentHashMap<String, ClientRecord> userRecords = new ConcurrentHashMap<>();
+    private static AtomicInteger clientIdCounter = new AtomicInteger(1);
 
-    public static boolean signup(String clientId, String password) {
-        if (registeredClients.containsKey(clientId)) {
-            return false; // Already registered.
+    /**
+     * Registers a new user with the provided username and password.
+     * Auto-generates a numeric client id.
+     * @return the generated numeric client id (as a String) if successful; null otherwise.
+     */
+    public static String signup(String username, String password) {
+        if (userRecords.containsKey(username)) {
+            System.out.println("AuthenticationManager: Signup failed – username '" + username + "' already exists.");
+            return null;
         }
-        registeredClients.put(clientId, password);
-        System.out.println("Client " + clientId + " signed up successfully.");
-        return true;
+        String newClientId = Integer.toString(clientIdCounter.getAndIncrement());
+        ClientRecord record = new ClientRecord(username, password, newClientId);
+        userRecords.put(username, record);
+        System.out.println("AuthenticationManager: User '" + username + "' signed up successfully with client id " + newClientId);
+        return newClientId;
     }
 
-    public static boolean login(String clientId, String password) {
-        if (registeredClients.containsKey(clientId) && registeredClients.get(clientId).equals(password)) {
-            System.out.println("Client " + clientId + " logged in successfully.");
-            return true;
+    /**
+     * Logs in an existing user.
+     * @param username the username provided.
+     * @param password the password provided.
+     * @return the numeric client id if login succeeds; null otherwise.
+     */
+    public static String login(String username, String password) {
+        if (userRecords.containsKey(username)) {
+            ClientRecord record = userRecords.get(username);
+            if (record.password.equals(password)) {
+                System.out.println("AuthenticationManager: User '" + username + "' logged in successfully with client id " + record.numericId);
+                return record.numericId;
+            }
         }
-        return false;
+        System.out.println("AuthenticationManager: Login failed for username '" + username + "'.");
+        return null;
+    }
+
+    /**
+     * Retrieves the numeric client id for the given username.
+     * @param username the username to look up.
+     * @return the numeric client id as a String, or null if not found.
+     */
+    public static String getClientIdByUsername(String username) {
+        ClientRecord record = userRecords.get(username);
+        return record == null ? null : record.numericId;
     }
 }

@@ -6,4 +6,7 @@ public class Constants {
     public static final int TIMEOUT_MILLISECONDS = 3000; // Timeout for file lock and ACK waiting
     public static final int CHUNK_SIZE = 1024; // Size in bytes for file segmentation (if needed)
     public static final int NUM_CHUNKS = 10;   // Simulated number of chunks per file
+
+    // New constant for repost (Others page) file naming convention.
+    public static final String OTHERS_PREFIX = "Others_";
 }

@@ -10,7 +10,8 @@ public class Message implements Serializable {
         ACCESS_PROFILE, FOLLOW, UNFOLLOW,
         HANDSHAKE, ACK, NACK, DIAGNOSTIC,
         SYNCHRONIZATION, FILE_CHUNK, FILE_END,
-        AUTH_SUCCESS, AUTH_FAILURE
+        AUTH_SUCCESS, AUTH_FAILURE,
+        REPOST
     }
 
     private MessageType type;

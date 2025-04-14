@@ -3,6 +3,12 @@ package client;
 import java.util.Scanner;
 import common.Message;
 import common.Message.MessageType;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.io.IOException;
+import java.util.Base64;
 
 public class CommandHandler {
     private ServerConnection connection;
@@ -12,9 +18,10 @@ public class CommandHandler {
     }
 
     public void start() {
+        printCommandList();
         Scanner scanner = new Scanner(System.in);
-        System.out.println("Commands: signup, login, upload, download, search, follow, unfollow, access_profile. Type 'exit' to quit.");
         while (true) {
+            System.out.print("> ");
             String input = scanner.nextLine().trim();
             if (input.equalsIgnoreCase("exit")) break;
             processCommand(input);
@@ -22,27 +29,50 @@ public class CommandHandler {
         scanner.close();
     }
 
+    private void printCommandList() {
+        System.out.println("======================================");
+        System.out.println("Available Commands:");
+        System.out.println("1. signup:          Format -> signup username:password");
+        System.out.println("   Example:         signup john:pass123" + "\n");
+        System.out.println("2. login:           Format -> login username:password");
+        System.out.println("   Example:         login john:pass123" + "\n");
+        System.out.println("3. upload:          Format -> upload photoName:<filename> <caption>");
+        System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>" + "\n");
+        System.out.println("4. download:        Format -> download <filename>");
+        System.out.println("   Example:         download image.jpg" + "\n");
+        System.out.println("5. search:          Format -> search <filename>");
+        System.out.println("   Example:         search image.jpg" + "\n");
+        System.out.println("6. follow:          Format -> follow <target_username>");
+        System.out.println("   Example:         follow alice" + "\n");
+        System.out.println("7. unfollow:        Format -> unfollow <target_username>");
+        System.out.println("   Example:         unfollow alice" + "\n");
+        System.out.println("8. access_profile:  Format -> access_profile <target_username>");
+        System.out.println("   Example:         access_profile alice" + "\n");
+        System.out.println("9. repost:          Format -> repost <postContent>");
+        System.out.println("   Example:         repost This is an amazing photo!" + "\n");
+        System.out.println("10. sync:           Format -> sync");
+        System.out.println("   Example:         sync" + "\n");
+        System.out.println("Type 'exit' to quit.");
+        System.out.println("======================================");
+    }
+
     private void processCommand(String input) {
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
         String payload = parts.length > 1 ? parts[1] : "";
-        String clientId = connection.getClientId();  // Use the session client id.
+        String clientId = connection.getClientId();
 
         switch (command) {
             case "signup":
-                // Expected: "clientId:password"
                 connection.sendMessage(new Message(MessageType.SIGNUP, clientId, payload));
                 break;
             case "login":
-                // Expected: "clientId:password"
                 connection.sendMessage(new Message(MessageType.LOGIN, clientId, payload));
                 break;
             case "upload":
-                // Expected: "photoName:<name>|caption:<text>|data:<dataString>"
-                connection.sendMessage(new Message(MessageType.UPLOAD, clientId, payload));
+                processUploadCommand(payload, clientId);
                 break;
             case "download":
-                // Expected: photoName
                 connection.sendMessage(new Message(MessageType.DOWNLOAD, clientId, payload));
                 FileTransferHandler.downloadFile(payload, connection);
                 break;
@@ -50,6 +80,7 @@ public class CommandHandler {
                 connection.sendMessage(new Message(MessageType.SEARCH, clientId, payload));
                 break;
             case "follow":
+                // Payload is target username.
                 connection.sendMessage(new Message(MessageType.FOLLOW, clientId, payload));
                 break;
             case "unfollow":
@@ -58,8 +89,40 @@ public class CommandHandler {
             case "access_profile":
                 connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, clientId, payload));
                 break;
+            case "repost":
+                connection.sendMessage(new Message(MessageType.REPOST, clientId, payload));
+                break;
+            case "sync":
+                System.out.println("Synchronizing local directory...");
+                FileSyncManager syncManager = new FileSyncManager("ClientFiles");
+                syncManager.synchronize();
+                break;
             default:
-                System.out.println("Unknown command.");
+                System.out.println("Unknown command. Please refer to the command list below:");
+                printCommandList();
+                break;
+        }
+    }
+
+    // Process upload command with simplified syntax.
+    private void processUploadCommand(String payload, String clientId) {
+        Pattern pattern = Pattern.compile("^photoName:(\\S+)\\s+<(.+)>$");
+        Matcher matcher = pattern.matcher(payload);
+        if (matcher.find()) {
+            String fileName = matcher.group(1);
+            String caption = matcher.group(2);
+            try {
+                byte[] fileData = Files.readAllBytes(Paths.get("ClientFiles", fileName));
+                String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
+                String newPayload = "photoName:" + fileName + "|caption:" + caption + "|data:" + fileDataBase64;
+                connection.sendMessage(new Message(MessageType.UPLOAD, clientId, newPayload));
+            } catch (IOException e) {
+                System.out.println("Upload Error: Unable to read file '" + fileName + "'. Ensure it exists in the ClientFiles directory.");
+            }
+        } else {
+            System.out.println("Upload command format invalid.");
+            System.out.println("Usage: upload photoName:<filename> <caption>");
+            System.out.println("Example: upload photoName:image.jpg <A beautiful sunset>");
         }
     }
 }
