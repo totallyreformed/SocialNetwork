@@ -56,6 +56,10 @@ public class AuthenticationManager {
         return null;
     }
 
+    public static Iterable<ClientRecord> getAllClientRecords() {
+        return userRecords.values();
+    }
+
     /**
      * Retrieves the numeric client id for the given username.
      * @param username the username to look up.

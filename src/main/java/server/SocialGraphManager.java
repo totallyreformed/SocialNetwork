@@ -23,8 +23,7 @@ public class SocialGraphManager {
         return instance;
     }
 
-    // Loads the social graph from a predetermined file.
-    // The file uses numeric client ids.
+    // Loads the social graph from a predetermined file (with numeric IDs).
     public void loadSocialGraph(String filename) {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
@@ -44,7 +43,7 @@ public class SocialGraphManager {
         }
     }
 
-    // Checks if the requester (by numeric id) is following the target.
+    // Checks if the requester (numeric ID) follows the target (numeric ID).
     public boolean isFollowing(String requesterId, String targetId) {
         Set<String> followers = socialGraph.get(targetId);
         boolean result = followers != null && followers.contains(requesterId);
@@ -52,27 +51,83 @@ public class SocialGraphManager {
         return result;
     }
 
-    // Handle a follow request.
-    // Payload now contains the target’s username.
+    /**
+     * Handles a follow request.
+     * The payload contains the target’s username.
+     * Instead of automatic acceptance, a FOLLOW_REQUEST message is sent to the target client.
+     */
     public void handleFollow(Message msg) {
         String targetUsername = msg.getPayload();
-        // Convert target username to numeric id.
+        // Convert target username to numeric ID.
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
             System.out.println("SocialGraphManager: Follow request error – target username '" + targetUsername + "' not found.");
             return;
         }
-        // Requester's numeric id is in the sender field.
         String requesterNumericId = msg.getSenderId();
-
-        // Add the requester as a follower of the target.
-        socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
-        socialGraph.get(targetNumericId).add(requesterNumericId);
-        System.out.println("SocialGraphManager: Client " + requesterNumericId + " now follows target " + targetNumericId + " (username: " + targetUsername + ")");
+        // Get requester username for logging.
+        String requesterUsername = getUsernameByNumericId(requesterNumericId);
+        String requestPayload = requesterUsername + ":" + requesterNumericId;
+        Message followRequest = new Message(MessageType.FOLLOW_REQUEST, "Server", requestPayload);
+        // Lookup target's active ClientHandler.
+        ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
+        if (targetHandler != null) {
+            try {
+                targetHandler.getOutputStream().writeObject(followRequest);
+                targetHandler.getOutputStream().flush();
+                System.out.println("SocialGraphManager: Sent FOLLOW_REQUEST to target (" + targetUsername + "). Awaiting response.");
+            } catch (IOException e) {
+                System.out.println("SocialGraphManager: Error sending FOLLOW_REQUEST to target: " + e.getMessage());
+            }
+        } else {
+            System.out.println("SocialGraphManager: Target (" + targetUsername + ") not online. Cannot send follow request.");
+        }
     }
 
-    // Handle an unfollow request.
-    // Payload contains the target’s username.
+    /**
+     * Handles a follow response from the target client.
+     * Expected payload format: "requesterUsername:decision" where decision is one of:
+     * reciprocate, accept, or reject.
+     */
+    public void handleFollowResponse(Message msg) {
+        String payload = msg.getPayload();
+        String[] parts = payload.split(":");
+        if (parts.length != 2) {
+            System.out.println("SocialGraphManager: FOLLOW_RESPONSE received with invalid format.");
+            return;
+        }
+        String requesterUsername = parts[0];
+        String decision = parts[1].toLowerCase();
+        // Convert requesterUsername to numeric id.
+        String requesterNumericId = AuthenticationManager.getClientIdByUsername(requesterUsername);
+        if (requesterNumericId == null) {
+            System.out.println("SocialGraphManager: FOLLOW_RESPONSE error – requester username '" + requesterUsername + "' not found.");
+            return;
+        }
+        // The target's numeric id is msg.getSenderId() because the target sends the response.
+        String targetNumericId = msg.getSenderId();
+        System.out.println("SocialGraphManager: FOLLOW_RESPONSE from target " + targetNumericId + " for requester " + requesterNumericId + " with decision: " + decision);
+        switch(decision) {
+            case "reciprocate":
+                socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
+                socialGraph.get(targetNumericId).add(requesterNumericId);
+                socialGraph.putIfAbsent(requesterNumericId, new HashSet<>());
+                socialGraph.get(requesterNumericId).add(targetNumericId);
+                break;
+            case "accept":
+                socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
+                socialGraph.get(targetNumericId).add(requesterNumericId);
+                break;
+            case "reject":
+                // Do nothing.
+                break;
+            default:
+                System.out.println("SocialGraphManager: FOLLOW_RESPONSE received with unknown decision.");
+                break;
+        }
+    }
+
+    // Handles unfollow requests where the payload contains the target's username.
     public void handleUnfollow(Message msg) {
         String targetUsername = msg.getPayload();
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
@@ -81,15 +136,37 @@ public class SocialGraphManager {
             return;
         }
         String requesterNumericId = msg.getSenderId();
-        Set<String> followers = socialGraph.get(targetNumericId);
-        if (followers != null) {
-            followers.remove(requesterNumericId);
+
+        // Remove the requester from the target's followers.
+        Set<String> targetFollowers = socialGraph.get(targetNumericId);
+        if (targetFollowers != null) {
+            targetFollowers.remove(requesterNumericId);
             System.out.println("SocialGraphManager: Client " + requesterNumericId + " unfollowed target " + targetNumericId + " (username: " + targetUsername + ")");
+        }
+
+        // Additionally, remove the target from the requester's followers to break mutual follow, if present.
+        Set<String> requesterFollowers = socialGraph.get(requesterNumericId);
+        if (requesterFollowers != null && requesterFollowers.contains(targetNumericId)) {
+            requesterFollowers.remove(targetNumericId);
+            System.out.println("SocialGraphManager: Also removed target " + targetNumericId + " from requester " + requesterNumericId + "'s follower list.");
         }
     }
 
-    // Handle access_profile request.
-    // The payload contains the target’s username.
+    // Improved search: checks for file existence in the ServerFiles directory.
+    public String searchPhoto(String photoName, String requesterNumericId) {
+        File file = new File("ServerFiles/" + photoName);
+        if (file.exists()) {
+            String result = "Found photo " + photoName + " at clientID dummyOwner";
+            System.out.println("SocialGraphManager: SEARCH found file " + photoName);
+            return result;
+        } else {
+            String result = "Photo " + photoName + " not found.";
+            System.out.println("SocialGraphManager: SEARCH did not find file " + photoName);
+            return result;
+        }
+    }
+
+    // Handles access_profile where the payload contains the target's username.
     public static void handleAccessProfile(Message msg, String requesterNumericId, ObjectOutputStream output) {
         String targetUsername = msg.getPayload();
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
@@ -119,17 +196,13 @@ public class SocialGraphManager {
         }
     }
 
-    // Improved search: checks for file existence in ServerFiles.
-    public String searchPhoto(String photoName, String requesterNumericId) {
-        File file = new File("ServerFiles/" + photoName);
-        if (file.exists()) {
-            String result = "Found photo " + photoName + " at clientID dummyOwner";
-            System.out.println("SocialGraphManager: SEARCH found file " + photoName);
-            return result;
-        } else {
-            String result = "Photo " + photoName + " not found.";
-            System.out.println("SocialGraphManager: SEARCH did not find file " + photoName);
-            return result;
+    // Helper method: Given a numeric id, retrieve its corresponding username.
+    private String getUsernameByNumericId(String numericId) {
+        for (ClientRecord record : AuthenticationManager.getAllClientRecords()) {
+            if (record.numericId.equals(numericId)) {
+                return record.username;
+            }
         }
+        return null;
     }
 }

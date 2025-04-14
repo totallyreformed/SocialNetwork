@@ -59,7 +59,7 @@ public class ClientHandler implements Runnable {
                         clientId = newClientId;
                         username = providedUsername;
                         activeClients.put(clientId, this);
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Your client id is " + clientId));
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Welcome " + username + ". Your client id is " + clientId));
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Username already exists."));
                     }
@@ -78,7 +78,7 @@ public class ClientHandler implements Runnable {
                         clientId = loginClientId;
                         username = providedUsername;
                         activeClients.put(clientId, this);
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + clientId));
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + username));
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Incorrect credentials."));
                     }
@@ -100,6 +100,9 @@ public class ClientHandler implements Runnable {
                 break;
             case UNFOLLOW:
                 SocialGraphManager.getInstance().handleUnfollow(msg);
+                break;
+            case FOLLOW_RESPONSE:
+                SocialGraphManager.getInstance().handleFollowResponse(msg);
                 break;
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);

@@ -46,11 +46,13 @@ public class CommandHandler {
         System.out.println("   Example:         follow alice" + "\n");
         System.out.println("7. unfollow:        Format -> unfollow <target_username>");
         System.out.println("   Example:         unfollow alice" + "\n");
-        System.out.println("8. access_profile:  Format -> access_profile <target_username>");
+        System.out.println("8. respondfollow:   Format -> respondfollow <requester_username>:<decision>");
+        System.out.println("   Example:         respondfollow alice:reciprocate" + "\n");
+        System.out.println("9. access_profile:  Format -> access_profile <target_username>");
         System.out.println("   Example:         access_profile alice" + "\n");
-        System.out.println("9. repost:          Format -> repost <postContent>");
+        System.out.println("10. repost:         Format -> repost <postContent>");
         System.out.println("   Example:         repost This is an amazing photo!" + "\n");
-        System.out.println("10. sync:           Format -> sync");
+        System.out.println("11. sync:           Format -> sync");
         System.out.println("   Example:         sync" + "\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
@@ -80,7 +82,6 @@ public class CommandHandler {
                 connection.sendMessage(new Message(MessageType.SEARCH, clientId, payload));
                 break;
             case "follow":
-                // Payload is target username.
                 connection.sendMessage(new Message(MessageType.FOLLOW, clientId, payload));
                 break;
             case "unfollow":
@@ -96,6 +97,9 @@ public class CommandHandler {
                 System.out.println("Synchronizing local directory...");
                 FileSyncManager syncManager = new FileSyncManager("ClientFiles");
                 syncManager.synchronize();
+                break;
+            case "respondfollow":
+                connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, clientId, payload));
                 break;
             default:
                 System.out.println("Unknown command. Please refer to the command list below:");
