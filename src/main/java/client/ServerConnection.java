@@ -16,8 +16,8 @@ public class ServerConnection {
             socket = new Socket("localhost", Constants.SERVER_PORT);
             output = new ObjectOutputStream(socket.getOutputStream());
             input = new ObjectInputStream(socket.getInputStream());
-            // Start a listener thread for incoming messages from the server.
-            new Thread(new ServerListener(input)).start();
+            // Start a listener thread for incoming messages.
+            new Thread(new ServerListener(input, this)).start();
             return true;
         } catch (IOException e) {
             System.out.println("Connection error: " + e.getMessage());
@@ -34,6 +34,11 @@ public class ServerConnection {
         }
     }
 
+    public ObjectOutputStream getOutputStream() {
+        return output;
+    }
+
+    // For direct access by FileTransferHandler during synchronous transfer.
     public ObjectInputStream getInputStream() {
         return input;
     }

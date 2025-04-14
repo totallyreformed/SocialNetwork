@@ -6,7 +6,7 @@ public class ClientMain {
         ServerConnection connection = new ServerConnection();
         if (connection.connect()) {
             System.out.println("Connected to server.");
-            // Start the command loop to process user input.
+            // Start the command loop for user input.
             CommandHandler handler = new CommandHandler(connection);
             handler.start();
         } else {

@@ -3,6 +3,7 @@ package client;
 import java.io.File;
 import java.nio.file.*;
 import java.io.IOException;
+import java.nio.file.StandardWatchEventKinds;
 
 public class FileSyncManager {
     private String localDirectory;
@@ -14,10 +15,10 @@ public class FileSyncManager {
     // Synchronizes the local directory with the server's directory.
     public void synchronize() {
         System.out.println("Synchronizing local directory: " + localDirectory);
-        // Implementation would scan files, compare timestamps, and update as needed.
+        // Implementation: compare files and update as needed.
     }
 
-    // Optionally: start a file watcher to monitor local changes.
+    // Start a file watcher to monitor local changes.
     public void startWatcher() {
         Path path = Paths.get(localDirectory);
         try {
@@ -31,7 +32,7 @@ public class FileSyncManager {
                         WatchKey key = watchService.take();
                         for (WatchEvent<?> event : key.pollEvents()) {
                             System.out.println("Detected change: " + event.context());
-                            // Trigger synchronization if required.
+                            // Trigger synchronization if necessary.
                         }
                         key.reset();
                     } catch (InterruptedException e) {

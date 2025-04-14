@@ -18,15 +18,15 @@ public class ServerMain {
         try (ServerSocket serverSocket = new ServerSocket(Constants.SERVER_PORT)) {
             System.out.println("Server started on port " + Constants.SERVER_PORT);
 
-            // Load the social graph from file
-            SocialGraphManager.getInstance().loadSocialGraph("SocialGraph.txt");
+            // Load the initial social graph.
+            SocialGraphManager.getInstance().loadSocialGraph("src/SocialGraph.txt");
 
-            // Accept clients continuously
+            // Accept clients continuously.
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("New client connected from " + clientSocket.getInetAddress());
+                System.out.println("New client connected: " + clientSocket.getInetAddress());
 
-                // Create a new ClientHandler and assign it to the thread pool
+                // Create a new ClientHandler for this connection.
                 ClientHandler handler = new ClientHandler(clientSocket);
                 threadPool.submit(handler);
             }

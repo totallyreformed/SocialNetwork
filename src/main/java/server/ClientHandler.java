@@ -20,48 +20,55 @@ public class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
-            // Initialize streams for sending and receiving messages
+            // Initialize object streams.
             output = new ObjectOutputStream(clientSocket.getOutputStream());
             input = new ObjectInputStream(clientSocket.getInputStream());
 
-            // Process client messages in a loop
             Message msg;
             while ((msg = (Message) input.readObject()) != null) {
-                System.out.println("Received from client: " + msg);
+                System.out.println("Received: " + msg);
                 handleMessage(msg);
             }
         } catch (IOException | ClassNotFoundException e) {
-            System.out.println("Client disconnected or error occurred: " + e.getMessage());
+            System.out.println("Client disconnected or error: " + e.getMessage());
         } finally {
             try {
                 if (clientSocket != null)
                     clientSocket.close();
-            } catch (IOException e) {
-                // Ignore cleanup errors.
-            }
+            } catch (IOException e) { }
         }
     }
 
     private void handleMessage(Message msg) {
         switch (msg.getType()) {
             case SIGNUP:
-                // Handle signup logic here and assign clientId
-                clientId = msg.getSenderId();
-                sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Welcome client " + clientId));
+                // Expected payload format: "clientId:password"
+                String[] signupParts = msg.getPayload().split(":");
+                if (signupParts.length == 2 && AuthenticationManager.signup(signupParts[0], signupParts[1])) {
+                    clientId = signupParts[0];
+                    sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Welcome client " + clientId));
+                } else {
+                    sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Signup failed for payload: " + msg.getPayload()));
+                }
                 break;
             case LOGIN:
-                // Handle login logic
+                // Expected payload format: "clientId:password"
+                String[] loginParts = msg.getPayload().split(":");
+                if (loginParts.length == 2 && AuthenticationManager.login(loginParts[0], loginParts[1])) {
+                    clientId = loginParts[0];
+                    sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Welcome back client " + clientId));
+                } else {
+                    sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Login failed for payload: " + msg.getPayload()));
+                }
                 break;
             case UPLOAD:
-                // Delegate upload processing to FileManager
                 FileManager.handleUpload(msg, clientId, output);
                 break;
             case DOWNLOAD:
-                // Delegate download processing to FileManager (with handshake & stop-and-wait)
-                FileManager.handleDownload(msg, clientId, output);
+                // Pass both output and input streams so the handshake can be handled.
+                FileManager.handleDownload(msg, clientId, input, output);
                 break;
             case ACCESS_PROFILE:
-                // Process profile access (only if allowed by social graph)
                 ProfileManager.handleAccessProfile(msg, clientId, output);
                 break;
             case FOLLOW:
@@ -73,7 +80,6 @@ public class ClientHandler implements Runnable {
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);
                 break;
-            // Add additional case statements as required.
             default:
                 sendMessage(new Message(Message.MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
                 break;

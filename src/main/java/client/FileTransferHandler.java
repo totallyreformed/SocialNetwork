@@ -2,27 +2,42 @@ package client;
 
 import common.Message;
 import common.Message.MessageType;
+import java.io.ObjectOutputStream;
+import java.io.IOException;
 
 public class FileTransferHandler {
-    private ServerConnection connection;
 
-    public FileTransferHandler(ServerConnection connection) {
-        this.connection = connection;
+    // Initiates the file download process.
+    public static void downloadFile(String photoName, ServerConnection connection) {
+        System.out.println("Initiating download for photo: " + photoName);
+        // The CommandHandler has already sent a DOWNLOAD message.
+        // The handshake and file chunk reception will be handled by ServerListener and
+        // delegated to this handler via handleIncomingMessage.
     }
 
-    // Initiates the file download process (3-way handshake, then chunked transfer).
-    public void downloadFile(String photoName) {
-        // Step 1: Initiate the handshake.
-        connection.sendMessage(new Message(MessageType.DOWNLOAD, "clientID_placeholder", photoName));
-        System.out.println("Initiated download for photo: " + photoName);
-
-        // Subsequent steps would:
-        // - Wait for handshake responses,
-        // - Receive file segments (APDUs),
-        // - For each segment, send an ACK (simulate stop-and-wait),
-        // - Handle timeouts/retransmission (for example, delayed ACKs for chunks 3 and 6),
-        // - Conclude with synchronization and a final transmission complete message.
+    // Handles incoming messages that are part of the file transfer.
+    public static void handleIncomingMessage(Message msg, ServerConnection connection) {
+        try {
+            switch (msg.getType()) {
+                case HANDSHAKE:
+                    System.out.println("Received handshake from server: " + msg.getPayload());
+                    // Immediately send ACK for handshake.
+                    connection.sendMessage(new Message(MessageType.ACK, "clientID_placeholder", "handshake ACK"));
+                    break;
+                case FILE_CHUNK:
+                    System.out.println("Received " + msg.getPayload());
+                    // Immediately send ACK for this chunk.
+                    connection.sendMessage(new Message(MessageType.ACK, "clientID_placeholder", "ACK for " + msg.getPayload().split(":")[0]));
+                    break;
+                case FILE_END:
+                    System.out.println("Download complete: " + msg.getPayload());
+                    // Optionally trigger directory synchronization.
+                    break;
+                default:
+                    break;
+            }
+        } catch (Exception e) {
+            System.out.println("Error in file transfer handling: " + e.getMessage());
+        }
     }
-
-    // Additional methods for retransmission logic and timeout management would be added.
 }

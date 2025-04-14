@@ -10,7 +10,7 @@ import java.util.Scanner;
 public class SocialGraphManager {
     private static SocialGraphManager instance = null;
 
-    // Maps client IDs to their set of followers
+    // Maps client IDs to their set of followers.
     private HashMap<String, Set<String>> socialGraph = new HashMap<>();
 
     private SocialGraphManager() {}
@@ -52,7 +52,8 @@ public class SocialGraphManager {
     public void handleFollow(Message msg) {
         String targetId = msg.getPayload();
         String requesterId = msg.getSenderId();
-        socialGraph.computeIfAbsent(targetId, k -> new HashSet<>()).add(requesterId);
+        socialGraph.putIfAbsent(targetId, new HashSet<>());
+        socialGraph.get(targetId).add(requesterId);
         System.out.println("Client " + requesterId + " now follows " + targetId);
     }
 
@@ -67,10 +68,9 @@ public class SocialGraphManager {
         }
     }
 
-    // A stub for searching a photo in the social graph.
+    // Simulated search: returns a dummy client ID who has the photo.
     public String searchPhoto(String photoName, String requesterId) {
-        // In a full implementation, search through the directories of the clients
-        // that are in the requester’s social graph.
+        // In a full implementation, search through directories in the social graph.
         return "Found photo " + photoName + " at clientID 1";
     }
 }

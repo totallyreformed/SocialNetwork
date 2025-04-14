@@ -13,7 +13,7 @@ public class CommandHandler {
 
     public void start() {
         Scanner scanner = new Scanner(System.in);
-        System.out.println("Enter commands (signup, login, upload, download, search, follow, unfollow, access_profile). Type 'exit' to quit.");
+        System.out.println("Commands: signup, login, upload, download, search, follow, unfollow, access_profile. Type 'exit' to quit.");
         while (true) {
             String input = scanner.nextLine().trim();
             if (input.equalsIgnoreCase("exit")) break;
@@ -23,27 +23,33 @@ public class CommandHandler {
     }
 
     private void processCommand(String input) {
-        // Basic command parsing: commands followed by a payload.
+        // Format: command [payload]
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
         String payload = parts.length > 1 ? parts[1] : "";
 
-        // In a full implementation, the clientId would be set after signup/login.
+        // For simplicity, the clientId is included in the payload for signup/login.
+        // For other commands, we assume the client has already logged in.
         String clientId = "clientID_placeholder";
 
         switch (command) {
             case "signup":
+                // Expected payload: "clientId:password"
                 connection.sendMessage(new Message(MessageType.SIGNUP, clientId, payload));
                 break;
             case "login":
+                // Expected payload: "clientId:password"
                 connection.sendMessage(new Message(MessageType.LOGIN, clientId, payload));
                 break;
             case "upload":
-                // Payload format example: "photoName:acropolis.jpg|caption:Beautiful view"
+                // Expected payload: "photoName:<name>|caption:<text>|data:<dataString>"
                 connection.sendMessage(new Message(MessageType.UPLOAD, clientId, payload));
                 break;
             case "download":
+                // Expected payload: photoName
                 connection.sendMessage(new Message(MessageType.DOWNLOAD, clientId, payload));
+                // Initiate file transfer handling on the client side.
+                FileTransferHandler.downloadFile(payload, connection);
                 break;
             case "search":
                 connection.sendMessage(new Message(MessageType.SEARCH, clientId, payload));
