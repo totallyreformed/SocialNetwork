@@ -86,6 +86,10 @@ public class ClientHandler implements Runnable {
                         username = providedUsername;
                         activeClients.put(clientId, this);
                         sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + username));
+                        // Retrieve and send any pending notifications.
+                        for (String notification : NotificationManager.getInstance().getNotifications(clientId)) {
+                            sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Notification: " + notification));
+                        }
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Incorrect credentials."));
                     }
@@ -93,6 +97,7 @@ public class ClientHandler implements Runnable {
                     sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Invalid format. Use username:password."));
                 }
                 break;
+
             case UPLOAD:
                 FileManager.handleUpload(msg, clientId, output);
                 break;

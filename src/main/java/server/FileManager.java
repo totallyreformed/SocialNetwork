@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileInputStream;
+import java.util.Set;
 
 public class FileManager {
 
@@ -32,37 +33,54 @@ public class FileManager {
             else if (part.startsWith("data:"))
                 base64Data = part.substring("data:".length());
         }
+
         try {
+            // Ensure the ServerFiles directory exists.
             File dir = new File("ServerFiles");
             if (!dir.exists()) {
                 dir.mkdirs();
                 System.out.println(Util.getTimestamp() + " FileManager: Created ServerFiles directory.");
             }
-            // Use fileName to store the file.
+
+            // Save the photo file using the provided file name.
             File photoFile = new File(dir, fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(base64Data.getBytes());
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName + " (Title: " + photoTitle + ")");
 
-            // Save the caption into a text file.
+            // Save the caption in a .txt file.
             File captionFile = new File(dir, fileName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
                 fos.write(caption.getBytes());
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
 
-            // Update the client's profile with the photo title.
-            ProfileManager.getInstance().updateProfile(clientId, clientId + " posted " + photoTitle);
+            // Update the uploader's profile with the new upload.
+            ProfileManager.getInstance().updateProfile(clientId, photoTitle);
+
+            // Notify each follower of this new upload.
+            String uploaderUsername = AuthenticationManager.getUsernameByNumericId(clientId);
+            String notificationMessage = "User " + uploaderUsername + " uploaded " + photoTitle;
+            Set<String> followers = SocialGraphManager.getInstance().getFollowers(clientId); // Assumes getFollowers() is implemented.
+            if (followers != null) {
+                for (String followerId : followers) {
+                    NotificationManager.getInstance().addNotification(followerId, notificationMessage);
+                    String followerUsername = AuthenticationManager.getUsernameByNumericId(followerId);
+                    System.out.println(Util.getTimestamp() + " FileManager: Notification sent to follower " + followerUsername + " (" + followerId + ")");
+                }
+            }
+
+            // Send a diagnostic message back to the uploader.
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Upload successful for " + fileName));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: UPLOAD completed for client " + clientId);
+
         } catch (IOException e) {
             System.out.println(Util.getTimestamp() + " FileManager: Error during file upload.");
             e.printStackTrace();
         }
     }
-
 
     // Handle file search: returns a diagnostic message based on file existence.
     public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {

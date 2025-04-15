@@ -205,4 +205,10 @@ public class SocialGraphManager {
         }
         return null;
     }
+
+    // Helper method: Given a numeric id, retrieve its corresponding client record.
+    public Set<String> getFollowers(String uploaderNumericId) {
+        return socialGraph.getOrDefault(uploaderNumericId, new HashSet<>());
+    }
+
 }
