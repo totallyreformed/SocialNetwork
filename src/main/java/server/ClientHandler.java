@@ -113,6 +113,26 @@ public class ClientHandler implements Runnable {
             default:
                 sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
                 break;
+            case COMMENT:
+                // Expect payload: "target_username:comment text"
+                String[] commentParts = msg.getPayload().split(":", 2);
+                if(commentParts.length == 2) {
+                    String targetUsername = commentParts[0];
+                    String commentText = commentParts[1];
+                    // Convert target username to numeric id.
+                    String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
+                    if(targetNumericId != null) {
+                        // Append the comment to the target's profile.
+                        ProfileManager.getInstance().addComment(targetNumericId, clientId, commentText);
+                        // Optionally, send a diagnostic message back.
+                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment added to " + targetUsername + "'s profile."));
+                    } else {
+                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: User '" + targetUsername + "' not found."));
+                    }
+                } else {
+                    sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: Invalid format. Use target_username:comment text"));
+                }
+                break;
         }
     }
 

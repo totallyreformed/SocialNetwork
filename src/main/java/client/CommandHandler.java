@@ -52,7 +52,9 @@ public class CommandHandler {
         System.out.println("   Example:         access_profile alice" + "\n");
         System.out.println("10. repost:         Format -> repost <postContent>");
         System.out.println("   Example:         repost This is an amazing photo!" + "\n");
-        System.out.println("11. sync:           Format -> sync");
+        System.out.println("11. comment:        Format -> comment <target_username>:<comment text>");
+        System.out.println("   Example:         comment alice:This photo is great!" + "\n");
+        System.out.println("12. sync:           Format -> sync");
         System.out.println("   Example:         sync" + "\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
@@ -101,6 +103,19 @@ public class CommandHandler {
             case "respondfollow":
                 connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, clientId, payload));
                 break;
+            case "comment":
+                // Payload format: "<target_username> <comment text>"
+                // Split the payload into two parts: the target username and the comment (the first token is username).
+                String[] commentTokens = payload.split(" ", 2);
+                if (commentTokens.length == 2) {
+                    String targetUsername = commentTokens[0];
+                    String commentText = commentTokens[1];
+                    String newPayload = targetUsername + ":" + commentText;
+                    connection.sendMessage(new Message(MessageType.COMMENT, clientId, newPayload));
+                } else {
+                    System.out.println("Comment command format invalid. Usage: comment <target_username> <comment text>");
+                }
+                break;
             default:
                 System.out.println("Unknown command. Please refer to the command list below:");
                 printCommandList();
@@ -110,23 +125,32 @@ public class CommandHandler {
 
     // Process upload command with simplified syntax.
     private void processUploadCommand(String payload, String clientId) {
-        Pattern pattern = Pattern.compile("^photoName:(\\S+)\\s+<(.+)>$");
+        // New expected format: <photoTitle>:<fileName> <caption>
+        // For example: "myVacation:beach.jpg <Had an amazing time at the beach>"
+        Pattern pattern = Pattern.compile("^([^:]+):(\\S+)\\s+<(.+)>$");
         Matcher matcher = pattern.matcher(payload);
         if (matcher.find()) {
-            String fileName = matcher.group(1);
-            String caption = matcher.group(2);
+            String photoTitle = matcher.group(1).trim();
+            String fileName = matcher.group(2).trim();
+            String caption = matcher.group(3).trim();
             try {
                 byte[] fileData = Files.readAllBytes(Paths.get("ClientFiles", fileName));
                 String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
-                String newPayload = "photoName:" + fileName + "|caption:" + caption + "|data:" + fileDataBase64;
+                // Construct the new payload with all fields.
+                String newPayload = "photoTitle:" + photoTitle +
+                        "|fileName:" + fileName +
+                        "|caption:" + caption +
+                        "|data:" + fileDataBase64;
                 connection.sendMessage(new Message(MessageType.UPLOAD, clientId, newPayload));
             } catch (IOException e) {
                 System.out.println("Upload Error: Unable to read file '" + fileName + "'. Ensure it exists in the ClientFiles directory.");
             }
         } else {
             System.out.println("Upload command format invalid.");
-            System.out.println("Usage: upload photoName:<filename> <caption>");
-            System.out.println("Example: upload photoName:image.jpg <A beautiful sunset>");
+            System.out.println("Usage: upload <photoTitle>:<fileName> <caption>");
+            System.out.println("Example: upload myVacation:beach.jpg <Had an amazing time at the beach>");
         }
     }
+
+
 }

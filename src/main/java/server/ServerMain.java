@@ -1,8 +1,9 @@
 package server;
 
+import common.Constants;
+import common.Util;
 import java.net.ServerSocket;
 import java.net.Socket;
-import common.Constants;
 import java.io.IOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -15,22 +16,26 @@ public class ServerMain {
     }
 
     public void startServer() {
-        try (ServerSocket serverSocket = new ServerSocket(Constants.SERVER_PORT)) {
-            System.out.println("Server started on port " + Constants.SERVER_PORT);
+        // Start the directory watcher in its own thread.
+        Thread watcherThread = new Thread(new DirectoryWatcher("ServerFiles"));
+        watcherThread.start();
+        System.out.println(Util.getTimestamp() + " ServerMain: DirectoryWatcher started for 'ServerFiles' directory.");
 
-            // Load the initial social graph.
+        try (ServerSocket serverSocket = new ServerSocket(Constants.SERVER_PORT)) {
+            System.out.println(Util.getTimestamp() + " ServerMain: Server started on port " + Constants.SERVER_PORT);
+
+            // Load the initial social graph from file.
             SocialGraphManager.getInstance().loadSocialGraph("src/SocialGraph.txt");
 
-            // Continuously accept client connections.
+            // Continuously accept incoming client connections.
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("New client connected: " + clientSocket.getInetAddress());
-
-                // Create and submit a ClientHandler for each connected client.
+                System.out.println(Util.getTimestamp() + " ServerMain: New client connected from " + clientSocket.getInetAddress());
                 ClientHandler handler = new ClientHandler(clientSocket);
                 threadPool.submit(handler);
             }
         } catch (IOException e) {
+            System.out.println(Util.getTimestamp() + " ServerMain: Error: " + e.getMessage());
             e.printStackTrace();
         }
     }

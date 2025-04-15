@@ -3,6 +3,7 @@ package server;
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
+import common.Util;
 import java.io.ObjectOutputStream;
 import java.io.ObjectInputStream;
 import java.io.IOException;
@@ -12,79 +13,82 @@ import java.io.FileInputStream;
 
 public class FileManager {
 
-    // Handle file upload. Payload format: "photoName:<name>|caption:<text>|data:<base64Data>"
+    // Handle file upload: saves the file and caption, and updates the profile.
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
-        System.out.println("FileManager: Processing UPLOAD from client " + clientId);
+        System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
         String payload = msg.getPayload();
         String[] parts = payload.split("\\|");
-        String photoName = "";
+        String photoTitle = "";
+        String fileName = "";
         String caption = "";
         String base64Data = "";
         for (String part : parts) {
-            if (part.startsWith("photoName:"))
-                photoName = part.substring("photoName:".length());
+            if (part.startsWith("photoTitle:"))
+                photoTitle = part.substring("photoTitle:".length());
+            else if (part.startsWith("fileName:"))
+                fileName = part.substring("fileName:".length());
             else if (part.startsWith("caption:"))
                 caption = part.substring("caption:".length());
             else if (part.startsWith("data:"))
                 base64Data = part.substring("data:".length());
         }
         try {
-            // Ensure server directory exists.
             File dir = new File("ServerFiles");
             if (!dir.exists()) {
                 dir.mkdirs();
-                System.out.println("FileManager: Created ServerFiles directory.");
+                System.out.println(Util.getTimestamp() + " FileManager: Created ServerFiles directory.");
             }
-            // Write photo data (simulated by writing the base64 string).
-            File photoFile = new File(dir, photoName);
+            // Use fileName to store the file.
+            File photoFile = new File(dir, fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(base64Data.getBytes());
             }
-            System.out.println("FileManager: Saved photo file " + photoName);
+            System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName + " (Title: " + photoTitle + ")");
 
-            // Write caption file.
-            File captionFile = new File(dir, photoName + ".txt");
+            // Save the caption into a text file.
+            File captionFile = new File(dir, fileName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
                 fos.write(caption.getBytes());
             }
-            System.out.println("FileManager: Saved caption for " + photoName);
+            System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
 
-            // Update client's profile.
-            ProfileManager.getInstance().updateProfile(clientId, clientId + " posted " + photoName);
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Upload successful for " + photoName));
+            // Update the client's profile with the photo title.
+            ProfileManager.getInstance().updateProfile(clientId, clientId + " posted " + photoTitle);
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Upload successful for " + fileName));
             output.flush();
-            System.out.println("FileManager: UPLOAD completed for client " + clientId);
+            System.out.println(Util.getTimestamp() + " FileManager: UPLOAD completed for client " + clientId);
         } catch (IOException e) {
-            System.out.println("FileManager: Error during file upload.");
+            System.out.println(Util.getTimestamp() + " FileManager: Error during file upload.");
             e.printStackTrace();
         }
     }
 
-    // Handle file search by checking if the file exists.
+
+    // Handle file search: returns a diagnostic message based on file existence.
     public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {
-        System.out.println("FileManager: Processing SEARCH for client " + clientId);
+        System.out.println(Util.getTimestamp() + " FileManager: Processing SEARCH for client " + clientId);
         String photoName = msg.getPayload();
         File file = new File("ServerFiles/" + photoName);
         String result;
         if (file.exists()) {
-            result = "Found photo " + photoName + " (owner: dummyOwner)";
-            System.out.println("FileManager: SEARCH found file " + photoName);
+            result = "Found photo " + photoName + " at clientID dummyOwner";
+            System.out.println(Util.getTimestamp() + " FileManager: SEARCH found file " + photoName);
         } else {
             result = "Photo " + photoName + " not found.";
-            System.out.println("FileManager: SEARCH did not find file " + photoName);
+            System.out.println(Util.getTimestamp() + " FileManager: SEARCH did not find file " + photoName);
         }
         try {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", result));
             output.flush();
         } catch (IOException e) {
-            System.out.println("FileManager: Error sending SEARCH result.");
+            System.out.println(Util.getTimestamp() + " FileManager: Error sending SEARCH result.");
             e.printStackTrace();
         }
     }
 
-    // Handle file download with a simulated 3-way handshake and stop-and-wait protocol.
+    // Handle file download with a simulated handshake and retransmission mechanism.
     public static void handleDownload(Message msg, String clientId, ObjectInputStream input, ObjectOutputStream output) {
-        System.out.println("FileManager: Processing DOWNLOAD for client " + clientId);
+        System.out.println(Util.getTimestamp() + " FileManager: Processing DOWNLOAD for client " + clientId);
         String photoName = msg.getPayload();
         File dir = new File("ServerFiles");
         File photoFile = new File(dir, photoName);
@@ -94,26 +98,23 @@ public class FileManager {
             if (!photoFile.exists()) {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "File " + photoName + " not found."));
                 output.flush();
-                System.out.println("FileManager: DOWNLOAD aborted – file not found.");
+                System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD aborted – file not found.");
                 return;
             }
 
-            // Step 1: Handshake initiation.
             output.writeObject(new Message(MessageType.HANDSHAKE, "Server", "Initiate handshake for " + photoName));
             output.flush();
-            System.out.println("FileManager: Handshake initiated for " + photoName);
+            System.out.println(Util.getTimestamp() + " FileManager: Handshake initiated for " + photoName);
 
-            // Step 2: Wait for handshake ACK.
             Message ackMsg = (Message) input.readObject();
             if (ackMsg.getType() != MessageType.ACK || !ackMsg.getPayload().contains("handshake")) {
                 output.writeObject(new Message(MessageType.NACK, "Server", "Handshake failed."));
                 output.flush();
-                System.out.println("FileManager: Handshake failed, aborting DOWNLOAD.");
+                System.out.println(Util.getTimestamp() + " FileManager: Handshake failed, aborting DOWNLOAD.");
                 return;
             }
-            System.out.println("FileManager: Handshake acknowledged by client.");
+            System.out.println(Util.getTimestamp() + " FileManager: Handshake acknowledged by client.");
 
-            // Step 3: Read file data.
             byte[] fileData = new byte[(int) photoFile.length()];
             try (FileInputStream fis = new FileInputStream(photoFile)) {
                 fis.read(fileData);
@@ -122,7 +123,6 @@ public class FileManager {
             int chunkSize = totalLength / Constants.NUM_CHUNKS;
             if (chunkSize == 0) chunkSize = totalLength;
 
-            // Simulate sending NUM_CHUNKS chunks.
             for (int i = 1; i <= Constants.NUM_CHUNKS; i++) {
                 int start = (i - 1) * chunkSize;
                 int end = (i == Constants.NUM_CHUNKS) ? totalLength : i * chunkSize;
@@ -133,27 +133,20 @@ public class FileManager {
                 int attempts = 0;
                 int maxAttempts = 3;
 
-                // For chunks 3 and 6, simulate retransmission.
                 while (!ackReceived && attempts < maxAttempts) {
                     output.writeObject(chunkMsg);
                     output.flush();
-                    System.out.println("FileManager: Sent chunk " + i + " (attempt " + (attempts+1) + "). Waiting for ACK...");
-                    try {
-                        // Wait for ACK within timeout.
-                        Message ackChunk = (Message) input.readObject();
-                        if (ackChunk.getType() == MessageType.ACK && ackChunk.getPayload().contains("Chunk " + i)) {
-                            ackReceived = true;
-                            System.out.println("FileManager: ACK received for chunk " + i);
-                        } else {
-                            attempts++;
-                            System.out.println("FileManager: Incorrect ACK for chunk " + i + ". Attempt " + (attempts+1));
-                        }
-                    } catch (Exception ex) {
+                    System.out.println(Util.getTimestamp() + " FileManager: Sent chunk " + i + " (attempt " + (attempts+1) + "). Waiting for ACK...");
+                    Message ackChunk = (Message) input.readObject();
+                    if (ackChunk.getType() == MessageType.ACK && ackChunk.getPayload().contains("Chunk " + i)) {
+                        ackReceived = true;
+                        System.out.println(Util.getTimestamp() + " FileManager: ACK received for chunk " + i);
+                    } else {
                         attempts++;
-                        System.out.println("FileManager: Timeout waiting for ACK for chunk " + i + ". Attempt " + (attempts+1));
+                        System.out.println(Util.getTimestamp() + " FileManager: Incorrect or no ACK for chunk " + i + ". Attempt " + (attempts+1));
                     }
                     if (!ackReceived && attempts >= maxAttempts) {
-                        System.out.println("FileManager: Max retransmissions reached for chunk " + i + ". Aborting DOWNLOAD.");
+                        System.out.println(Util.getTimestamp() + " FileManager: Max retransmissions reached for chunk " + i + ". Aborting DOWNLOAD.");
                         output.writeObject(new Message(MessageType.NACK, "Server", "Download aborted at chunk " + i));
                         output.flush();
                         return;
@@ -161,7 +154,6 @@ public class FileManager {
                 }
             }
 
-            // After sending all chunks, send caption if available.
             String captionText;
             if (captionFile.exists()) {
                 byte[] capData = new byte[(int) captionFile.length()];
@@ -169,20 +161,18 @@ public class FileManager {
                     fis.read(capData);
                 }
                 captionText = new String(capData);
-                System.out.println("FileManager: Caption found for " + photoName);
+                System.out.println(Util.getTimestamp() + " FileManager: Caption found for " + photoName);
             } else {
                 captionText = "No caption available for " + photoName;
-                System.out.println("FileManager: Caption missing for " + photoName);
+                System.out.println(Util.getTimestamp() + " FileManager: Caption missing for " + photoName);
             }
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Caption: " + captionText));
             output.flush();
-
-            // Final completion message.
             output.writeObject(new Message(MessageType.FILE_END, "Server", "Transmission completed for " + photoName));
             output.flush();
-            System.out.println("FileManager: DOWNLOAD completed successfully for " + photoName);
+            System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD completed successfully for " + photoName);
         } catch (IOException | ClassNotFoundException e) {
-            System.out.println("FileManager: Exception during DOWNLOAD: " + e.getMessage());
+            System.out.println(Util.getTimestamp() + " FileManager: Exception during DOWNLOAD: " + e.getMessage());
             e.printStackTrace();
         }
     }

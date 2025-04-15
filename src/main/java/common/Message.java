@@ -11,7 +11,7 @@ public class Message implements Serializable {
         HANDSHAKE, ACK, NACK, DIAGNOSTIC,
         SYNCHRONIZATION, FILE_CHUNK, FILE_END,
         AUTH_SUCCESS, AUTH_FAILURE,
-        REPOST
+        REPOST, COMMENT
     }
 
     private MessageType type;
