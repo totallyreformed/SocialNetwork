@@ -78,38 +78,35 @@ public class ProfileManager {
 
     // Locked update to profile file.
     public synchronized void updateProfile(String clientId, String content) {
-        if(!lockProfile(clientId, clientId)) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Unable to lock profile " + clientId + " for update.");
-            return;
-        }
+        // Retrieve the username corresponding to clientId.
+        String username = AuthenticationManager.getUsernameByNumericId(clientId);
         String fileName = "Profile_" + clientId + ".txt";
-        try(FileWriter fw = new FileWriter(new File(fileName), true)){
-            fw.write("[" + Util.getTimestamp() + "] " + content + "\n");
-            System.out.println(Util.getTimestamp() + " ProfileManager: Updated " + fileName + " with: " + content);
-        } catch(IOException e) {
+        try (FileWriter fw = new FileWriter(new File(fileName), true)) {
+            fw.write("[" + Util.getTimestamp() + "] " + username + " posted " + content + "\n");
+            System.out.println(Util.getTimestamp() + " ProfileManager: Updated " + fileName + " with: " + username + " posted " + content);
+        } catch (IOException e) {
             System.out.println(Util.getTimestamp() + " ProfileManager: Error updating profile " + fileName);
             e.printStackTrace();
         }
-        unlockProfile(clientId);
     }
+
 
     // Adds a comment to a target's profile.
     public synchronized void addComment(String targetId, String commenterId, String comment) {
-        if(!lockProfile(targetId, commenterId)){
-            System.out.println(Util.getTimestamp() + " ProfileManager: Unable to lock profile " + targetId + " for commenting.");
-            return;
-        }
-        String fileName = "Profile_" + targetId + ".txt";
-        try(FileWriter fw = new FileWriter(new File(fileName), true)){
-            String logEntry = "[" + Util.getTimestamp() + "] Comment from " + commenterId + ": " + comment;
+        // Retrieve the commenter's username.
+        String commenterName = AuthenticationManager.getUsernameByNumericId(commenterId);
+        String targetName = AuthenticationManager.getUsernameByNumericId(targetId);
+        String fileName = "Profile_" + targetName + ".txt";
+        try (FileWriter fw = new FileWriter(new File(fileName), true)) {
+            String logEntry = "[" + Util.getTimestamp() + "] Comment from " + commenterName + ": " + comment;
             fw.write(logEntry + "\n");
             System.out.println(Util.getTimestamp() + " ProfileManager: Appended comment to " + fileName + ": " + logEntry);
-        } catch(IOException e) {
+        } catch (IOException e) {
             System.out.println(Util.getTimestamp() + " ProfileManager: Error appending comment to " + fileName);
             e.printStackTrace();
         }
-        unlockProfile(targetId);
     }
+
 
     // Retrieve profile content (for simulation, simply return a message).
     public synchronized String getProfile(String clientId) {

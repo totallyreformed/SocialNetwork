@@ -98,15 +98,14 @@ public class SocialGraphManager {
         }
         String requesterUsername = parts[0];
         String decision = parts[1].toLowerCase();
-        // Convert requesterUsername to numeric id.
         String requesterNumericId = AuthenticationManager.getClientIdByUsername(requesterUsername);
         if (requesterNumericId == null) {
             System.out.println("SocialGraphManager: FOLLOW_RESPONSE error – requester username '" + requesterUsername + "' not found.");
             return;
         }
-        // The target's numeric id is msg.getSenderId() because the target sends the response.
         String targetNumericId = msg.getSenderId();
-        System.out.println("SocialGraphManager: FOLLOW_RESPONSE from target " + targetNumericId + " for requester " + requesterNumericId + " with decision: " + decision);
+        String targetUsername = AuthenticationManager.getUsernameByNumericId(targetNumericId);
+        System.out.println("SocialGraphManager: FOLLOW_RESPONSE from target " + targetUsername + " for requester " + requesterUsername + " with decision: " + decision);
         switch(decision) {
             case "reciprocate":
                 socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
@@ -126,6 +125,7 @@ public class SocialGraphManager {
                 break;
         }
     }
+
 
     // Handles unfollow requests where the payload contains the target's username.
     public void handleUnfollow(Message msg) {

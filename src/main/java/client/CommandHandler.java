@@ -61,39 +61,46 @@ public class CommandHandler {
     }
 
     private void processCommand(String input) {
+        // Split command and payload.
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
-        String payload = parts.length > 1 ? parts[1] : "";
-        String clientId = connection.getClientId();
+        String payload = parts.length > 1 ? parts[1].trim() : "";
+
+        // Ensure that for all commands other than signup or login,
+        // the user must be logged in.
+        if (!command.equals("signup") && !command.equals("login") && connection.getClientId().equals("clientID_placeholder")) {
+            System.out.println("You must login first. Use: login username:password");
+            return;
+        }
 
         switch (command) {
             case "signup":
-                connection.sendMessage(new Message(MessageType.SIGNUP, clientId, payload));
+                connection.sendMessage(new Message(MessageType.SIGNUP, connection.getClientId(), payload));
                 break;
             case "login":
-                connection.sendMessage(new Message(MessageType.LOGIN, clientId, payload));
+                connection.sendMessage(new Message(MessageType.LOGIN, connection.getClientId(), payload));
                 break;
             case "upload":
-                processUploadCommand(payload, clientId);
+                processUploadCommand(payload, connection.getClientId());
                 break;
             case "download":
-                connection.sendMessage(new Message(MessageType.DOWNLOAD, clientId, payload));
+                connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), payload));
                 FileTransferHandler.downloadFile(payload, connection);
                 break;
             case "search":
-                connection.sendMessage(new Message(MessageType.SEARCH, clientId, payload));
+                connection.sendMessage(new Message(MessageType.SEARCH, connection.getClientId(), payload));
                 break;
             case "follow":
-                connection.sendMessage(new Message(MessageType.FOLLOW, clientId, payload));
+                connection.sendMessage(new Message(MessageType.FOLLOW, connection.getClientId(), payload));
                 break;
             case "unfollow":
-                connection.sendMessage(new Message(MessageType.UNFOLLOW, clientId, payload));
+                connection.sendMessage(new Message(MessageType.UNFOLLOW, connection.getClientId(), payload));
                 break;
             case "access_profile":
-                connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, clientId, payload));
+                connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, connection.getClientId(), payload));
                 break;
             case "repost":
-                connection.sendMessage(new Message(MessageType.REPOST, clientId, payload));
+                connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), payload));
                 break;
             case "sync":
                 System.out.println("Synchronizing local directory...");
@@ -101,17 +108,16 @@ public class CommandHandler {
                 syncManager.synchronize();
                 break;
             case "respondfollow":
-                connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, clientId, payload));
+                connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, connection.getClientId(), payload));
                 break;
             case "comment":
-                // Payload format: "<target_username> <comment text>"
-                // Split the payload into two parts: the target username and the comment (the first token is username).
+                // Expected format: "target_username <comment text>"
                 String[] commentTokens = payload.split(" ", 2);
                 if (commentTokens.length == 2) {
                     String targetUsername = commentTokens[0];
                     String commentText = commentTokens[1];
                     String newPayload = targetUsername + ":" + commentText;
-                    connection.sendMessage(new Message(MessageType.COMMENT, clientId, newPayload));
+                    connection.sendMessage(new Message(MessageType.COMMENT, connection.getClientId(), newPayload));
                 } else {
                     System.out.println("Comment command format invalid. Usage: comment <target_username> <comment text>");
                 }
@@ -123,10 +129,8 @@ public class CommandHandler {
         }
     }
 
-    // Process upload command with simplified syntax.
     private void processUploadCommand(String payload, String clientId) {
         // New expected format: <photoTitle>:<fileName> <caption>
-        // For example: "myVacation:beach.jpg <Had an amazing time at the beach>"
         Pattern pattern = Pattern.compile("^([^:]+):(\\S+)\\s+<(.+)>$");
         Matcher matcher = pattern.matcher(payload);
         if (matcher.find()) {
@@ -136,7 +140,6 @@ public class CommandHandler {
             try {
                 byte[] fileData = Files.readAllBytes(Paths.get("ClientFiles", fileName));
                 String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
-                // Construct the new payload with all fields.
                 String newPayload = "photoTitle:" + photoTitle +
                         "|fileName:" + fileName +
                         "|caption:" + caption +
@@ -151,6 +154,4 @@ public class CommandHandler {
             System.out.println("Example: upload myVacation:beach.jpg <Had an amazing time at the beach>");
         }
     }
-
-
 }

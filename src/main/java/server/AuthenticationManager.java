@@ -69,4 +69,19 @@ public class AuthenticationManager {
         ClientRecord record = userRecords.get(username);
         return record == null ? null : record.numericId;
     }
+
+    /**
+     * Retrieves the username for the given numeric client id.
+     * @param numericId the numeric client id to look up.
+     * @return the username, or null if not found.
+     */
+    public static String getUsernameByNumericId(String numericId) {
+        for (ClientRecord record : userRecords.values()) {
+            if (record.numericId.equals(numericId)) {
+                return record.username;
+            }
+        }
+        return null;
+    }
+
 }

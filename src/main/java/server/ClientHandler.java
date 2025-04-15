@@ -47,6 +47,13 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleMessage(Message msg) {
+        // For any message other than SIGNUP or LOGIN, ensure the client is logged in.
+        if (msg.getType() != MessageType.SIGNUP && msg.getType() != MessageType.LOGIN
+                && (clientId == null || clientId.equals("clientID_placeholder"))) {
+            sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Not logged in. Please login first."));
+            return;
+        }
+
         switch (msg.getType()) {
             case SIGNUP:
                 // Payload format: "username:password"
@@ -59,7 +66,7 @@ public class ClientHandler implements Runnable {
                         clientId = newClientId;
                         username = providedUsername;
                         activeClients.put(clientId, this);
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Welcome " + username + ". Your client id is " + clientId));
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Your client id is " + clientId));
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Username already exists."));
                     }
@@ -101,30 +108,21 @@ public class ClientHandler implements Runnable {
             case UNFOLLOW:
                 SocialGraphManager.getInstance().handleUnfollow(msg);
                 break;
-            case FOLLOW_RESPONSE:
-                SocialGraphManager.getInstance().handleFollowResponse(msg);
-                break;
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);
                 break;
             case REPOST:
                 ProfileManager.handleRepost(msg, clientId, output);
                 break;
-            default:
-                sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
-                break;
             case COMMENT:
                 // Expect payload: "target_username:comment text"
                 String[] commentParts = msg.getPayload().split(":", 2);
-                if(commentParts.length == 2) {
+                if (commentParts.length == 2) {
                     String targetUsername = commentParts[0];
                     String commentText = commentParts[1];
-                    // Convert target username to numeric id.
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
-                    if(targetNumericId != null) {
-                        // Append the comment to the target's profile.
+                    if (targetNumericId != null) {
                         ProfileManager.getInstance().addComment(targetNumericId, clientId, commentText);
-                        // Optionally, send a diagnostic message back.
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment added to " + targetUsername + "'s profile."));
                     } else {
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: User '" + targetUsername + "' not found."));
@@ -133,8 +131,15 @@ public class ClientHandler implements Runnable {
                     sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: Invalid format. Use target_username:comment text"));
                 }
                 break;
+            case FOLLOW_RESPONSE:
+                SocialGraphManager.getInstance().handleFollowResponse(msg);
+                break;
+            default:
+                sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
+                break;
         }
     }
+
 
     private void sendMessage(Message msg) {
         try {
