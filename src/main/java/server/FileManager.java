@@ -89,7 +89,7 @@ public class FileManager {
         File file = new File("ServerFiles/" + photoName);
         String result;
         if (file.exists()) {
-            result = "Found photo " + photoName + " at clientID dummyOwner";
+            result = "Found photo " + photoName + ". Owner: " + AuthenticationManager.getUsernameByNumericId(clientId);
             System.out.println(Util.getTimestamp() + " FileManager: SEARCH found file " + photoName);
         } else {
             result = "Photo " + photoName + " not found.";
@@ -120,12 +120,28 @@ public class FileManager {
                 return;
             }
 
+            // Step 1: Initiate handshake.
             output.writeObject(new Message(MessageType.HANDSHAKE, "Server", "Initiate handshake for " + photoName));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: Handshake initiated for " + photoName);
 
-            Message ackMsg = (Message) input.readObject();
-            if (ackMsg.getType() != MessageType.ACK || !ackMsg.getPayload().contains("handshake")) {
+            // Step 2: Wait for a handshake ACK for up to 5 seconds.
+            long startTime = System.currentTimeMillis();
+            Message ackMsg = null;
+            while (System.currentTimeMillis() - startTime < 5000) {
+                try {
+                    ackMsg = (Message) input.readObject();
+                    if (ackMsg.getType() == MessageType.ACK && ackMsg.getPayload().contains("handshake")) {
+                        break;
+                    }
+                    // If we receive a different message, we continue waiting.
+                } catch (Exception ex) {
+                    // Optionally log the exception and continue attempting to read.
+                    System.out.println(Util.getTimestamp() + " FileManager: Exception while waiting for handshake ACK: " + ex.getMessage());
+                }
+            }
+
+            if (ackMsg == null || ackMsg.getType() != MessageType.ACK || !ackMsg.getPayload().contains("handshake")) {
                 output.writeObject(new Message(MessageType.NACK, "Server", "Handshake failed."));
                 output.flush();
                 System.out.println(Util.getTimestamp() + " FileManager: Handshake failed, aborting DOWNLOAD.");
@@ -133,14 +149,19 @@ public class FileManager {
             }
             System.out.println(Util.getTimestamp() + " FileManager: Handshake acknowledged by client.");
 
+            // Step 3: Read the file data.
             byte[] fileData = new byte[(int) photoFile.length()];
             try (FileInputStream fis = new FileInputStream(photoFile)) {
-                fis.read(fileData);
+                int bytesRead = fis.read(fileData);
+                System.out.println(Util.getTimestamp() + " FileManager: Read " + bytesRead + " bytes from " + photoName);
             }
             int totalLength = fileData.length;
             int chunkSize = totalLength / Constants.NUM_CHUNKS;
-            if (chunkSize == 0) chunkSize = totalLength;
+            if (chunkSize == 0) {
+                chunkSize = totalLength;
+            }
 
+            // For each simulated chunk, send the chunk and wait for an ACK.
             for (int i = 1; i <= Constants.NUM_CHUNKS; i++) {
                 int start = (i - 1) * chunkSize;
                 int end = (i == Constants.NUM_CHUNKS) ? totalLength : i * chunkSize;
@@ -150,18 +171,17 @@ public class FileManager {
                 boolean ackReceived = false;
                 int attempts = 0;
                 int maxAttempts = 3;
-
                 while (!ackReceived && attempts < maxAttempts) {
                     output.writeObject(chunkMsg);
                     output.flush();
-                    System.out.println(Util.getTimestamp() + " FileManager: Sent chunk " + i + " (attempt " + (attempts+1) + "). Waiting for ACK...");
+                    System.out.println(Util.getTimestamp() + " FileManager: Sent chunk " + i + " (attempt " + (attempts + 1) + "). Waiting for ACK...");
                     Message ackChunk = (Message) input.readObject();
                     if (ackChunk.getType() == MessageType.ACK && ackChunk.getPayload().contains("Chunk " + i)) {
                         ackReceived = true;
                         System.out.println(Util.getTimestamp() + " FileManager: ACK received for chunk " + i);
                     } else {
                         attempts++;
-                        System.out.println(Util.getTimestamp() + " FileManager: Incorrect or no ACK for chunk " + i + ". Attempt " + (attempts+1));
+                        System.out.println(Util.getTimestamp() + " FileManager: Incorrect or no ACK for chunk " + i + ". Attempt " + (attempts + 1));
                     }
                     if (!ackReceived && attempts >= maxAttempts) {
                         System.out.println(Util.getTimestamp() + " FileManager: Max retransmissions reached for chunk " + i + ". Aborting DOWNLOAD.");
@@ -172,6 +192,7 @@ public class FileManager {
                 }
             }
 
+            // Step 4: Send the caption if available.
             String captionText;
             if (captionFile.exists()) {
                 byte[] capData = new byte[(int) captionFile.length()];
@@ -186,6 +207,8 @@ public class FileManager {
             }
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Caption: " + captionText));
             output.flush();
+
+            // Final completion message.
             output.writeObject(new Message(MessageType.FILE_END, "Server", "Transmission completed for " + photoName));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD completed successfully for " + photoName);

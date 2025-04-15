@@ -54,8 +54,6 @@ public class CommandHandler {
         System.out.println("   Example:         repost This is an amazing photo!" + "\n");
         System.out.println("11. comment:        Format -> comment <target_username>:<comment text>");
         System.out.println("   Example:         comment alice:This photo is great!" + "\n");
-        System.out.println("12. sync:           Format -> sync");
-        System.out.println("   Example:         sync" + "\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
     }
@@ -101,11 +99,6 @@ public class CommandHandler {
                 break;
             case "repost":
                 connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), payload));
-                break;
-            case "sync":
-                System.out.println("Synchronizing local directory...");
-                FileSyncManager syncManager = new FileSyncManager("ClientFiles");
-                syncManager.synchronize();
                 break;
             case "respondfollow":
                 connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, connection.getClientId(), payload));

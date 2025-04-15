@@ -111,7 +111,7 @@ public class FileTransferHandler {
 
     // Saves the downloaded file to the local ClientFiles directory.
     private static void saveDownloadedFile() {
-        if (currentDownloadFile == null || downloadBuffer.length() == 0) {
+        if (currentDownloadFile == null || downloadBuffer.isEmpty()) {
             System.out.println("FileTransferHandler: No file data to save.");
             return;
         }

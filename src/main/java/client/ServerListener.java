@@ -37,6 +37,7 @@ public class ServerListener implements Runnable {
                 // File transfer messages (handshake, chunk, NACK) are handled silently.
                 if (msg.getType() == MessageType.HANDSHAKE ||
                         msg.getType() == MessageType.FILE_CHUNK ||
+                        msg.getType() == MessageType.FILE_END ||
                         msg.getType() == MessageType.NACK) {
                     FileTransferHandler.handleIncomingMessage(msg, connection);
                 }
