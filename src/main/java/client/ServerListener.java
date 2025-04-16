@@ -34,6 +34,11 @@ public class ServerListener implements Runnable {
                     System.out.println(msg.getPayload());
                 }
 
+                if (msg.getType() == MessageType.FOLLOW_REQUEST) {
+                    System.out.println("Follow request received: " + msg.getPayload());
+                    continue;
+                }
+
                 // File transfer messages (handshake, chunk, NACK) are handled silently.
                 if (msg.getType() == MessageType.HANDSHAKE ||
                         msg.getType() == MessageType.FILE_CHUNK ||

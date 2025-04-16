@@ -120,15 +120,23 @@ public class ClientHandler implements Runnable {
                 ProfileManager.handleRepost(msg, clientId, output);
                 break;
             case COMMENT:
-                // Expect payload: "target_username:comment text"
+                // Expected payload: "target_username:comment text"
                 String[] commentParts = msg.getPayload().split(":", 2);
                 if (commentParts.length == 2) {
                     String targetUsername = commentParts[0];
                     String commentText = commentParts[1];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
                     if (targetNumericId != null) {
+                        // Append the comment to the target's profile.
                         ProfileManager.getInstance().addComment(targetNumericId, clientId, commentText);
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment added to " + targetUsername + "'s profile."));
+                        // Notify target if they are online.
+                        ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
+                        if (targetHandler != null) {
+                            String commenterName = AuthenticationManager.getUsernameByNumericId(clientId);
+                            targetHandler.sendExternalMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                                    "New comment on your profile from " + commenterName + ": " + commentText));
+                        }
                     } else {
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: User '" + targetUsername + "' not found."));
                     }
@@ -136,6 +144,7 @@ public class ClientHandler implements Runnable {
                     sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: Invalid format. Use target_username:comment text"));
                 }
                 break;
+
             case FOLLOW_RESPONSE:
                 SocialGraphManager.getInstance().handleFollowResponse(msg);
                 break;
