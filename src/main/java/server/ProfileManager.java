@@ -1,13 +1,18 @@
+// server/ProfileManager.java
 package server;
 
 import common.Constants;
 import common.Message;
 import common.Message.MessageType;
 import common.Util;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.LinkedList;
@@ -15,28 +20,23 @@ import java.util.Queue;
 import java.io.ObjectOutputStream;
 
 public class ProfileManager {
-    // Map to track locked profiles (key: clientId, value: true if locked)
-    private ConcurrentHashMap<String, Boolean> locks = new ConcurrentHashMap<>();
-    // Map to track waiting clients for each profile.
+    // --- Locking infrastructure for concurrent profile access ---
+    private ConcurrentHashMap<String, Boolean> locks         = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Queue<String>> waitingQueues = new ConcurrentHashMap<>();
-    // Map to track timers for each locked profile.
-    private ConcurrentHashMap<String, Timer> timers = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, Timer>    timers        = new ConcurrentHashMap<>();
+
+    // --- Counters to assign unique post IDs per client ---
+    private ConcurrentHashMap<String, AtomicInteger> postIdCounters = new ConcurrentHashMap<>();
 
     private static ProfileManager instance = null;
-
     private ProfileManager() { }
-
     public static ProfileManager getInstance() {
-        if (instance == null) {
-            instance = new ProfileManager();
-        }
+        if (instance == null) instance = new ProfileManager();
         return instance;
     }
 
     /**
-     * Attempts to lock the profile file corresponding to clientId for requesterId.
-     * If the profile is already locked, request is queued.
-     * @return true if lock acquired; false otherwise.
+     * Lock the profile for exclusive access; queue up others.
      */
     public synchronized boolean lockProfile(String clientId, String requesterId) {
         if (locks.containsKey(clientId)) {
@@ -48,11 +48,10 @@ public class ProfileManager {
         } else {
             locks.put(clientId, true);
             Timer timer = new Timer();
-            timer.schedule(new TimerTask(){
-                @Override
-                public void run() {
-                    System.out.println(Util.getTimestamp() + " ProfileManager: Lock timeout for profile "
-                            + clientId + " reached. Releasing lock.");
+            timer.schedule(new TimerTask() {
+                @Override public void run() {
+                    System.out.println(Util.getTimestamp()
+                            + " ProfileManager: Lock timeout for profile " + clientId);
                     unlockProfile(clientId);
                 }
             }, Constants.TIMEOUT_MILLISECONDS);
@@ -63,142 +62,207 @@ public class ProfileManager {
     }
 
     /**
-     * Unlocks the profile file for clientId and notifies any waiting clients.
+     * Unlock and notify next waiter.
      */
     public synchronized void unlockProfile(String clientId) {
         locks.remove(clientId);
-        Timer timer = timers.remove(clientId);
-        if (timer != null) timer.cancel();
+        Timer t = timers.remove(clientId);
+        if (t != null) t.cancel();
         System.out.println(Util.getTimestamp() + " ProfileManager: Profile " + clientId + " unlocked.");
-        if (waitingQueues.containsKey(clientId)) {
-            Queue<String> queue = waitingQueues.get(clientId);
-            if (!queue.isEmpty()) {
-                String nextClient = queue.poll();
-                ClientHandler handler = ClientHandler.activeClients.get(nextClient);
-                if (handler != null) {
-                    try {
-                        handler.getOutputStream().writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                                "Profile " + clientId + " is now available."));
-                        handler.getOutputStream().flush();
-                    } catch (IOException e) {
-                        System.out.println(Util.getTimestamp() + " ProfileManager: Error notifying client " + nextClient);
-                    }
+        Queue<String> q = waitingQueues.get(clientId);
+        if (q != null && !q.isEmpty()) {
+            String next = q.poll();
+            ClientHandler handler = ClientHandler.activeClients.get(next);
+            if (handler != null) {
+                try {
+                    handler.getOutputStream().writeObject(
+                            new Message(MessageType.DIAGNOSTIC, "Server",
+                                    "Profile " + clientId + " is now available."));
+                    handler.getOutputStream().flush();
+                } catch (IOException e) {
+                    System.out.println(Util.getTimestamp()
+                            + " ProfileManager: Error notifying client " + next);
                 }
             }
         }
     }
 
     /**
-     * Updates a profile file by appending new content (e.g. a photo post).
-     * The profile file is first locked, updated, then unlocked.
+     * Append a new post: assigns a unique postId and writes it.
      */
     public synchronized void updateProfile(String clientId, String content) {
-        // Attempt to lock the profile for exclusive update.
         if (!lockProfile(clientId, clientId)) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Unable to acquire lock on profile " + clientId);
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Unable to acquire lock on profile " + clientId);
             return;
         }
-        // Retrieve the username from internal records.
         String username = AuthenticationManager.getUsernameByNumericId(clientId);
-        String fileName = "Profile_" + clientId + ".txt";
+        AtomicInteger ctr = postIdCounters.computeIfAbsent(clientId, k -> new AtomicInteger(1));
+        int postId = ctr.getAndIncrement();
+
+        String fileName = "Profile_" + Constants.GROUP_ID + "client" + clientId + ".txt";
+        String entry    = "PostID:" + postId
+                + " [" + Util.getTimestamp() + "] "
+                + username + " posted " + content + "\n";
+
         try (FileWriter fw = new FileWriter(new File(fileName), true)) {
-            fw.write("[" + Util.getTimestamp() + "] " + username + " posted " + content + "\n");
+            fw.write(entry);
             System.out.println(Util.getTimestamp() + " ProfileManager: Updated " + fileName
-                    + " with: " + username + " posted " + content);
+                    + " with: " + entry.trim());
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error updating profile " + fileName);
+            System.out.println(Util.getTimestamp() + " ProfileManager: Error writing to " + fileName);
             e.printStackTrace();
         }
-        // Release the lock after update.
         unlockProfile(clientId);
     }
 
     /**
-     * Adds a comment to the target user's profile.
-     * The profile is locked during the update and then unlocked.
+     * Add a comment to a specific post by postId.
      */
-    public synchronized void addComment(String targetId, String commenterId, String comment) {
+    public synchronized void addCommentToPost(String targetId,
+                                              String postId,
+                                              String commenterId,
+                                              String comment) {
         if (!lockProfile(targetId, commenterId)) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Unable to lock profile " + targetId
-                    + " for commenting.");
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Unable to lock profile " + targetId + " for commenting.");
             return;
         }
-        // Retrieve commenter's username.
         String commenterName = AuthenticationManager.getUsernameByNumericId(commenterId);
-        // Retrieve target's username using targetId.
-        String targetName = AuthenticationManager.getUsernameByNumericId(targetId);
-        // Here we assume the profile file is named using the target's numeric id.
-        String fileName = "Profile_" + targetId + ".txt";
+        String fileName = "Profile_" + Constants.GROUP_ID + "client" + targetId + ".txt";
+        String logEntry = "[" + Util.getTimestamp() + "] Comment on post "
+                + postId + " from " + commenterName + ": " + comment + "\n";
+
         try (FileWriter fw = new FileWriter(new File(fileName), true)) {
-            String logEntry = "[" + Util.getTimestamp() + "] Comment from " + commenterName + ": " + comment;
-            fw.write(logEntry + "\n");
-            System.out.println(Util.getTimestamp() + " ProfileManager: Appended comment to " + fileName
-                    + ": " + logEntry);
+            fw.write(logEntry);
+            System.out.println(Util.getTimestamp() + " ProfileManager: Appended comment to "
+                    + fileName + ": " + logEntry.trim());
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error appending comment to " + fileName);
+            System.out.println(Util.getTimestamp() + " ProfileManager: Error appending comment to "
+                    + fileName);
             e.printStackTrace();
         }
         unlockProfile(targetId);
     }
 
     /**
-     * Retrieves profile content. For simulation, returns a simple string.
+     * Simulate retrieval of profile content if needed.
      */
     public synchronized String getProfile(String clientId) {
-        System.out.println(Util.getTimestamp() + " ProfileManager: Retrieving profile for client " + clientId);
+        System.out.println(Util.getTimestamp() + " ProfileManager: Retrieving profile for client "
+                + clientId);
         return "Profile content for client " + clientId;
     }
 
     /**
-     * Handles access_profile requests.
+     * Handle access_profile exactly as before (unchanged).
      */
-    public static void handleAccessProfile(Message msg, String requesterNumericId, ObjectOutputStream output) {
+    public static void handleAccessProfile(Message msg,
+                                           String requesterNumericId,
+                                           ObjectOutputStream output) {
         String targetUsername = msg.getPayload();
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
             try {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access_profile failed: User '"
-                        + targetUsername + "' not found."));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Access_profile failed: User '" + targetUsername + "' not found."));
                 output.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            } catch (IOException e) { e.printStackTrace(); }
             return;
         }
-        boolean allowed = SocialGraphManager.getInstance().isFollowing(requesterNumericId, targetNumericId);
+        boolean allowed = SocialGraphManager.getInstance()
+                .isFollowing(requesterNumericId, targetNumericId);
         try {
             if (allowed) {
                 String profileContent = getInstance().getProfile(targetNumericId);
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access granted. " + profileContent));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Access granted. " + profileContent));
                 System.out.println(Util.getTimestamp() + " ProfileManager: Access granted for requester "
                         + requesterNumericId + " to profile " + targetNumericId);
             } else {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access denied: You do not follow user '"
-                        + targetUsername + "'."));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Access denied: You do not follow user '" + targetUsername + "'."));
                 System.out.println(Util.getTimestamp() + " ProfileManager: Access denied for requester "
                         + requesterNumericId + " to profile " + targetNumericId);
             }
             output.flush();
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error handling access_profile: " + e.getMessage());
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Error handling access_profile: " + e.getMessage());
             e.printStackTrace();
         }
     }
 
     /**
-     * Handles repost requests.
+     * Handle repost requests by reading the original post line and appending it to Others_ file.
      */
-    public static void handleRepost(Message msg, String requesterNumericId, ObjectOutputStream output) {
-        String postContent = msg.getPayload();
-        String othersFileName = "Others_Profile_" + requesterNumericId + ".txt";
+    public static void handleRepost(Message msg,
+                                    String requesterNumericId,
+                                    ObjectOutputStream output) {
+        String payload = msg.getPayload();
+        String[] parts = payload.split(":", 2);
+        if (parts.length != 2) {
+            try {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Repost failed: Invalid format. Use target_username:postId"));
+                output.flush();
+            } catch (IOException e) { e.printStackTrace(); }
+            return;
+        }
+        String targetUsername = parts[0];
+        String postId         = parts[1];
+        String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
+        if (targetNumericId == null) {
+            try {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Repost failed: User '" + targetUsername + "' not found."));
+                output.flush();
+            } catch (IOException e) { e.printStackTrace(); }
+            return;
+        }
+
+        // Read the profile file to find the original post line
+        String profileFileName = "Profile_" + Constants.GROUP_ID + "client" + targetNumericId + ".txt";
+        String originalLine = "";
+        try (BufferedReader br = new BufferedReader(new FileReader(profileFileName))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("PostID:" + postId + " ")) {
+                    originalLine = line;
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Error reading profile file " + profileFileName);
+            e.printStackTrace();
+        }
+        if (originalLine.isEmpty()) {
+            try {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Repost failed: Post " + postId + " not found for user " + targetUsername));
+                output.flush();
+            } catch (IOException e) { e.printStackTrace(); }
+            return;
+        }
+
+        // Append to the "Others" file of the requester
+        String othersFileName = "Others_" + Constants.GROUP_ID + "client" + requesterNumericId + ".txt";
         try (FileWriter fw = new FileWriter(new File(othersFileName), true)) {
-            fw.write("[" + Util.getTimestamp() + "] Repost: " + postContent + "\n");
-            System.out.println(Util.getTimestamp() + " ProfileManager: Client " + requesterNumericId
-                    + " reposted: " + postContent + " to " + othersFileName);
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Repost successful to " + othersFileName));
+            String entry = "[" + Util.getTimestamp() + "] Repost of post "
+                    + postId + " from " + targetUsername + ": " + originalLine + "\n";
+            fw.write(entry);
+            System.out.println(Util.getTimestamp() + " ProfileManager: Client "
+                    + requesterNumericId + " reposted post " + postId
+                    + " from user " + targetUsername + " to " + othersFileName);
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "Repost successful: post " + postId
+                            + " from " + targetUsername
+                            + " added to your Others file."));
             output.flush();
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error in repost for client " + requesterNumericId);
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Error in repost for client " + requesterNumericId);
             e.printStackTrace();
         }
     }

@@ -1,19 +1,23 @@
+// client/ProfileClientManager.java
 package client;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
+import common.Constants;  // NEW: for GROUP_ID
 
 public class ProfileClientManager {
     private String clientId;
+    // According to rubric: Profile_<GROUP_ID>client<clientId>.txt
     private String profileFileName;
-    private String othersProfileFileName; // For reposts.
+    // According to rubric: Others_<GROUP_ID>client<clientId>.txt
+    private String othersProfileFileName;
 
     public ProfileClientManager(String clientId) {
         this.clientId = clientId;
-        this.profileFileName = "Profile_Client_" + clientId + ".txt";
-        this.othersProfileFileName = "Others_Profile_" + clientId + ".txt";
+        this.profileFileName   = "Profile_" + Constants.GROUP_ID + "client" + clientId + ".txt";
+        this.othersProfileFileName = "Others_" + Constants.GROUP_ID + "client" + clientId + ".txt";
     }
 
     // Append a new post to the local profile.

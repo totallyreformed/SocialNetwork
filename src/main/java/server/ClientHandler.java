@@ -1,24 +1,24 @@
+// server/ClientHandler.java
 package server;
 
 import java.net.Socket;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import common.Message;
-import common.Message.MessageType;
 import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
+
+import common.Message;
+import common.Message.MessageType;
 
 public class ClientHandler implements Runnable {
     private Socket clientSocket;
     private ObjectInputStream input;
     private ObjectOutputStream output;
 
-    // Internal numeric client id (as a String) assigned upon successful signup or login.
-    private String clientId;
-    // The username provided by the user.
-    private String username;
+    private String clientId;     // Numeric ID assigned on signup/login
+    private String username;     // Username of this client
 
-    // Map of active client connections, keyed by the numeric client id.
+    // All active connections, keyed by numeric client ID
     public static ConcurrentHashMap<String, ClientHandler> activeClients = new ConcurrentHashMap<>();
 
     public ClientHandler(Socket socket) {
@@ -30,7 +30,7 @@ public class ClientHandler implements Runnable {
     public void run() {
         try {
             output = new ObjectOutputStream(clientSocket.getOutputStream());
-            input = new ObjectInputStream(clientSocket.getInputStream());
+            input  = new ObjectInputStream(clientSocket.getInputStream());
             System.out.println("ClientHandler: Streams established.");
 
             Message msg;
@@ -41,14 +41,15 @@ public class ClientHandler implements Runnable {
         } catch (IOException | ClassNotFoundException e) {
             System.out.println("ClientHandler: Error or disconnection: " + e.getMessage());
         } finally {
-            try { if (clientSocket != null) clientSocket.close(); } catch (IOException e) { }
+            try { clientSocket.close(); } catch (IOException e) { }
             System.out.println("ClientHandler: Socket closed for client " + clientId);
         }
     }
 
     private void handleMessage(Message msg) {
-        // For any message other than SIGNUP or LOGIN, ensure the client is logged in.
-        if (msg.getType() != MessageType.SIGNUP && msg.getType() != MessageType.LOGIN
+        // Enforce login before other commands
+        if (msg.getType() != MessageType.SIGNUP
+                && msg.getType() != MessageType.LOGIN
                 && (clientId == null || clientId.equals("clientID_placeholder"))) {
             sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Not logged in. Please login first."));
             return;
@@ -74,6 +75,7 @@ public class ClientHandler implements Runnable {
                     sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Invalid format. Use username:password."));
                 }
                 break;
+
             case LOGIN:
                 // Payload format: "username:password"
                 String[] loginParts = msg.getPayload().split(":");
@@ -101,59 +103,87 @@ public class ClientHandler implements Runnable {
             case UPLOAD:
                 FileManager.handleUpload(msg, clientId, output);
                 break;
+
             case DOWNLOAD:
                 FileManager.handleDownload(msg, clientId, input, output);
                 break;
+
             case ACCESS_PROFILE:
                 ProfileManager.handleAccessProfile(msg, clientId, output);
                 break;
+
             case FOLLOW:
                 SocialGraphManager.getInstance().handleFollow(msg);
                 break;
+
             case UNFOLLOW:
                 SocialGraphManager.getInstance().handleUnfollow(msg);
                 break;
+
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);
                 break;
+
             case REPOST:
-                ProfileManager.handleRepost(msg, clientId, output);
-                break;
-            case COMMENT:
-                // Expected payload: "target_username:comment text"
-                String[] commentParts = msg.getPayload().split(":", 2);
-                if (commentParts.length == 2) {
-                    String targetUsername = commentParts[0];
-                    String commentText = commentParts[1];
+                // Now expects payload "targetUsername:postId"
+                String[] repostParts = msg.getPayload().split(":", 2);
+                if (repostParts.length == 2) {
+                    String targetUsername = repostParts[0];
+                    String postId         = repostParts[1];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
                     if (targetNumericId != null) {
-                        // Append the comment to the target's profile.
-                        ProfileManager.getInstance().addComment(targetNumericId, clientId, commentText);
-                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment added to " + targetUsername + "'s profile."));
-                        // Notify target if they are online.
-                        ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
+                        ProfileManager.handleRepost(msg, clientId, output);
+                    } else {
+                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                                "Repost failed: User '" + targetUsername + "' not found."));
+                    }
+                } else {
+                    sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Repost failed: Invalid format. Use target_username:postId"));
+                }
+                break;
+
+            case COMMENT:
+                // Now expects payload "targetUsername:postId:commentText"
+                String[] commentParts = msg.getPayload().split(":", 3);
+                if (commentParts.length == 3) {
+                    String targetUsername = commentParts[0];
+                    String postId         = commentParts[1];
+                    String commentText    = commentParts[2];
+                    String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
+
+                    if (targetNumericId != null) {
+                        ProfileManager.getInstance()
+                                .addCommentToPost(targetNumericId, postId, clientId, commentText);
+                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                                "Comment added to post " + postId + " of user " + targetUsername));
+
+                        // Notify original poster if they are online
+                        ClientHandler targetHandler = activeClients.get(targetNumericId);
                         if (targetHandler != null) {
                             String commenterName = AuthenticationManager.getUsernameByNumericId(clientId);
                             targetHandler.sendExternalMessage(new Message(MessageType.DIAGNOSTIC, "Server",
-                                    "New comment on your profile from " + commenterName + ": " + commentText));
+                                    "New comment on your post " + postId + " from " + commenterName + ": " + commentText));
                         }
                     } else {
-                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: User '" + targetUsername + "' not found."));
+                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                                "Comment failed: User '" + targetUsername + "' not found."));
                     }
                 } else {
-                    sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Comment failed: Invalid format. Use target_username:comment text"));
+                    sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Comment failed: Invalid format. Use target_username:postId:comment text"));
                 }
                 break;
 
             case FOLLOW_RESPONSE:
                 SocialGraphManager.getInstance().handleFollowResponse(msg);
                 break;
+
             default:
                 sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
                 break;
         }
     }
-
 
     private void sendMessage(Message msg) {
         try {
@@ -161,15 +191,15 @@ public class ClientHandler implements Runnable {
             output.flush();
             System.out.println("ClientHandler: Sent message: " + msg);
         } catch (IOException e) {
-            System.out.println("ClientHandler: Error sending message to client " + clientId + ": " + e.getMessage());
+            System.out.println("ClientHandler: Error sending message to client "
+                    + clientId + ": " + e.getMessage());
         }
     }
 
-    // Expose output stream for notifications.
+    // Exposed for notifying clients asynchronously
     public ObjectOutputStream getOutputStream() {
         return output;
     }
-
     public void sendExternalMessage(Message msg) {
         sendMessage(msg);
     }

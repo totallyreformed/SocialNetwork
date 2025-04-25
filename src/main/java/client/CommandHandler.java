@@ -1,3 +1,4 @@
+// client/CommandHandler.java
 package client;
 
 import java.util.Scanner;
@@ -33,27 +34,27 @@ public class CommandHandler {
         System.out.println("======================================");
         System.out.println("Available Commands:");
         System.out.println("1. signup:          Format -> signup username:password");
-        System.out.println("   Example:         signup john:pass123" + "\n");
+        System.out.println("   Example:         signup john:pass123\n");
         System.out.println("2. login:           Format -> login username:password");
-        System.out.println("   Example:         login john:pass123" + "\n");
-        System.out.println("3. upload:          Format -> upload photoName:<filename> <caption>");
-        System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>" + "\n");
+        System.out.println("   Example:         login john:pass123\n");
+        System.out.println("3. upload:          Format -> upload photoTitle:<filename> <caption>");
+        System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>\n");
         System.out.println("4. download:        Format -> download <filename>");
-        System.out.println("   Example:         download image.jpg" + "\n");
+        System.out.println("   Example:         download image.jpg\n");
         System.out.println("5. search:          Format -> search <filename>");
-        System.out.println("   Example:         search image.jpg" + "\n");
+        System.out.println("   Example:         search image.jpg\n");
         System.out.println("6. follow:          Format -> follow <target_username>");
-        System.out.println("   Example:         follow alice" + "\n");
+        System.out.println("   Example:         follow alice\n");
         System.out.println("7. unfollow:        Format -> unfollow <target_username>");
-        System.out.println("   Example:         unfollow alice" + "\n");
+        System.out.println("   Example:         unfollow alice\n");
         System.out.println("8. respondfollow:   Format -> respondfollow <requester_username>:<decision>");
-        System.out.println("   Example:         respondfollow alice:reciprocate" + "\n");
+        System.out.println("   Example:         respondfollow alice:reciprocate\n");
         System.out.println("9. access_profile:  Format -> access_profile <target_username>");
-        System.out.println("   Example:         access_profile alice" + "\n");
-        System.out.println("10. repost:         Format -> repost <postContent>");
-        System.out.println("   Example:         repost This is an amazing photo!" + "\n");
-        System.out.println("11. comment:        Format -> comment <target_username>:<comment text>");
-        System.out.println("   Example:         comment alice:This photo is great!" + "\n");
+        System.out.println("   Example:         access_profile alice\n");
+        System.out.println("10. repost:         Format -> repost <target_username>:<postId>");
+        System.out.println("   Example:         repost alice:3\n");
+        System.out.println("11. comment:        Format -> comment <target_username>:<postId>:<comment text>");
+        System.out.println("   Example:         comment alice:3:Nice shot!\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
     }
@@ -64,9 +65,10 @@ public class CommandHandler {
         String command = parts[0].toLowerCase();
         String payload = parts.length > 1 ? parts[1].trim() : "";
 
-        // Ensure that for all commands other than signup or login,
-        // the user must be logged in.
-        if (!command.equals("signup") && !command.equals("login") && connection.getClientId().equals("clientID_placeholder")) {
+        // Ensure user is logged in for commands beyond signup/login.
+        if (!command.equals("signup") &&
+                !command.equals("login") &&
+                connection.getClientId().equals("clientID_placeholder")) {
             System.out.println("You must login first. Use: login username:password");
             return;
         }
@@ -98,21 +100,28 @@ public class CommandHandler {
                 connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, connection.getClientId(), payload));
                 break;
             case "repost":
-                connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), payload));
-                break;
-            case "respondfollow":
-                connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, connection.getClientId(), payload));
+                // Now expects: targetUsername:postId
+                String[] repostTokens = payload.split(":", 2);
+                if (repostTokens.length == 2) {
+                    String targetUsername = repostTokens[0].trim();
+                    String postId         = repostTokens[1].trim();
+                    String newPayload     = targetUsername + ":" + postId;
+                    connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), newPayload));
+                } else {
+                    System.out.println("Repost command format invalid. Usage: repost <target_username>:<postId>");
+                }
                 break;
             case "comment":
-                // Expected format: "target_username <comment text>"
-                String[] commentTokens = payload.split(" ", 2);
-                if (commentTokens.length == 2) {
-                    String targetUsername = commentTokens[0];
-                    String commentText = commentTokens[1];
-                    String newPayload = targetUsername + ":" + commentText;
+                // Now expects: targetUsername:postId:commentText
+                String[] commentTokens = payload.split(":", 3);
+                if (commentTokens.length == 3) {
+                    String targetUsername = commentTokens[0].trim();
+                    String postId         = commentTokens[1].trim();
+                    String commentText    = commentTokens[2].trim();
+                    String newPayload     = targetUsername + ":" + postId + ":" + commentText;
                     connection.sendMessage(new Message(MessageType.COMMENT, connection.getClientId(), newPayload));
                 } else {
-                    System.out.println("Comment command format invalid. Usage: comment <target_username> <comment text>");
+                    System.out.println("Comment command format invalid. Usage: comment <target_username>:<postId>:<comment text>");
                 }
                 break;
             default:
@@ -128,18 +137,19 @@ public class CommandHandler {
         Matcher matcher = pattern.matcher(payload);
         if (matcher.find()) {
             String photoTitle = matcher.group(1).trim();
-            String fileName = matcher.group(2).trim();
-            String caption = matcher.group(3).trim();
+            String fileName   = matcher.group(2).trim();
+            String caption    = matcher.group(3).trim();
             try {
-                byte[] fileData = Files.readAllBytes(Paths.get("ClientFiles", fileName));
+                byte[] fileData      = Files.readAllBytes(Paths.get("ClientFiles", fileName));
                 String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
-                String newPayload = "photoTitle:" + photoTitle +
-                        "|fileName:" + fileName +
-                        "|caption:" + caption +
-                        "|data:" + fileDataBase64;
+                String newPayload    = "photoTitle:" + photoTitle +
+                        "|fileName:"  + fileName +
+                        "|caption:"   + caption +
+                        "|data:"      + fileDataBase64;
                 connection.sendMessage(new Message(MessageType.UPLOAD, clientId, newPayload));
             } catch (IOException e) {
-                System.out.println("Upload Error: Unable to read file '" + fileName + "'. Ensure it exists in the ClientFiles directory.");
+                System.out.println("Upload Error: Unable to read file '" + fileName
+                        + "'. Ensure it exists in the ClientFiles directory.");
             }
         } else {
             System.out.println("Upload command format invalid.");

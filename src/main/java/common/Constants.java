@@ -1,3 +1,4 @@
+// common/Constants.java
 package common;
 
 public class Constants {
@@ -9,4 +10,8 @@ public class Constants {
 
     // New constant for repost (Others page) file naming convention.
     public static final String OTHERS_PREFIX = "Others_";
+
+    // --------------------------------------------------------------------
+    // Replace "<YOUR_GROUP_ID>" with your actual group number.
+    public static final String GROUP_ID = "40";
 }
