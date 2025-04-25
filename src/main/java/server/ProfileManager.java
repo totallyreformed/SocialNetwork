@@ -11,13 +11,14 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.io.ObjectOutputStream;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.LinkedList;
 import java.util.Queue;
-import java.io.ObjectOutputStream;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ProfileManager {
     // --- Locking infrastructure for concurrent profile access ---
@@ -117,7 +118,8 @@ public class ProfileManager {
     }
 
     /**
-     * Add a comment to a specific post by postId.
+     * Add a comment to a specific post by postId, then queue notifications
+     * for the original author and all of their followers.
      */
     public synchronized void addCommentToPost(String targetId,
                                               String postId,
@@ -142,6 +144,22 @@ public class ProfileManager {
                     + fileName);
             e.printStackTrace();
         }
+
+        // Prepare notification text
+        String notif = "New comment on post " + postId
+                + " from " + commenterName + ": " + comment;
+
+        // Queue for original author
+        NotificationManager.getInstance().addNotification(targetId, notif);
+
+        // Queue for all followers (except the commenter)
+        Set<String> followers = SocialGraphManager.getInstance().getFollowers(targetId);
+        for (String followerId : followers) {
+            if (!followerId.equals(commenterId)) {
+                NotificationManager.getInstance().addNotification(followerId, notif);
+            }
+        }
+
         unlockProfile(targetId);
     }
 
@@ -155,7 +173,7 @@ public class ProfileManager {
     }
 
     /**
-     * Handle access_profile exactly as before (unchanged).
+     * Handle access_profile requests unchanged.
      */
     public static void handleAccessProfile(Message msg,
                                            String requesterNumericId,
@@ -181,7 +199,7 @@ public class ProfileManager {
                         + requesterNumericId + " to profile " + targetNumericId);
             } else {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "Access denied: You do not follow user '" + targetUsername + "'."));
+                        "Access denied: You do not follow user '" + targetUsername + "'." ));
                 System.out.println(Util.getTimestamp() + " ProfileManager: Access denied for requester "
                         + requesterNumericId + " to profile " + targetNumericId);
             }
@@ -194,7 +212,8 @@ public class ProfileManager {
     }
 
     /**
-     * Handle repost requests by reading the original post line and appending it to Others_ file.
+     * Handle repost requests: append to server's Others file, notify reposting client,
+     * instruct client to sync locally, and queue a notification for the original author.
      */
     public static void handleRepost(Message msg,
                                     String requesterNumericId,
@@ -221,7 +240,7 @@ public class ProfileManager {
             return;
         }
 
-        // Read the profile file to find the original post line
+        // Read original post
         String profileFileName = "Profile_" + Constants.GROUP_ID + "client" + targetNumericId + ".txt";
         String originalLine = "";
         try (BufferedReader br = new BufferedReader(new FileReader(profileFileName))) {
@@ -246,24 +265,43 @@ public class ProfileManager {
             return;
         }
 
-        // Append to the "Others" file of the requester
+        // Append to server-side Others file
         String othersFileName = "Others_" + Constants.GROUP_ID + "client" + requesterNumericId + ".txt";
+        String entry = "[" + Util.getTimestamp() + "] Repost of post "
+                + postId + " from " + targetUsername
+                + ": " + originalLine;
         try (FileWriter fw = new FileWriter(new File(othersFileName), true)) {
-            String entry = "[" + Util.getTimestamp() + "] Repost of post "
-                    + postId + " from " + targetUsername + ": " + originalLine + "\n";
-            fw.write(entry);
-            System.out.println(Util.getTimestamp() + " ProfileManager: Client "
-                    + requesterNumericId + " reposted post " + postId
-                    + " from user " + targetUsername + " to " + othersFileName);
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                    "Repost successful: post " + postId
-                            + " from " + targetUsername
-                            + " added to your Others file."));
-            output.flush();
+            fw.write(entry + "\n");
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Client " + requesterNumericId
+                    + " reposted post " + postId
+                    + " from user " + targetUsername);
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error in repost for client " + requesterNumericId);
             e.printStackTrace();
         }
+
+        try {
+            // Notify reposting client of success
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "Repost successful: post " + postId
+                            + " from " + targetUsername
+                            + " added to your Others file."));
+            output.flush();
+
+            // Instruct client to sync its local Others file
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "SYNC_REPOST:" + entry));
+            output.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // Queue notification for the original author
+        String reposterName = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
+        String notif = "Your post " + postId
+                + " was reposted by " + reposterName;
+        NotificationManager.getInstance().addNotification(targetNumericId, notif);
     }
 }
