@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ProfileManager {
     // --- Locking infrastructure for concurrent profile access ---
     private ConcurrentHashMap<String, Boolean> locks         = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, String> lockOwners = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Queue<String>> waitingQueues = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Timer>    timers        = new ConcurrentHashMap<>();
 
@@ -38,6 +39,7 @@ public class ProfileManager {
 
     /**
      * Lock the profile for exclusive access; queue up others.
+     * Also records the owner so we can warn them on timeout.
      */
     public synchronized boolean lockProfile(String clientId, String requesterId) {
         if (locks.containsKey(clientId)) {
@@ -48,15 +50,32 @@ public class ProfileManager {
             return false;
         } else {
             locks.put(clientId, true);
+            lockOwners.put(clientId, requesterId);                                    // NEW
+
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
                 @Override public void run() {
+                    // 1) Warn the owner that their lock is expiring
+                    String owner = lockOwners.get(clientId);
+                    ClientHandler ownerHandler = ClientHandler.activeClients.get(owner);
+                    if (ownerHandler != null) {
+                        try {
+                            ownerHandler.getOutputStream().writeObject(
+                                    new Message(MessageType.DIAGNOSTIC, "Server",
+                                            "Warning: your lock on Profile_"
+                                                    + Constants.GROUP_ID + "client" + clientId
+                                                    + " has timed out and will be released."));
+                            ownerHandler.getOutputStream().flush();
+                        } catch (IOException ignored) { }
+                    }
+                    // 2) Actually release the lock
                     System.out.println(Util.getTimestamp()
                             + " ProfileManager: Lock timeout for profile " + clientId);
                     unlockProfile(clientId);
                 }
             }, Constants.TIMEOUT_MILLISECONDS);
             timers.put(clientId, timer);
+
             System.out.println(Util.getTimestamp() + " ProfileManager: Profile " + clientId + " locked.");
             return true;
         }
@@ -67,9 +86,11 @@ public class ProfileManager {
      */
     public synchronized void unlockProfile(String clientId) {
         locks.remove(clientId);
+        lockOwners.remove(clientId);                                                  // NEW
         Timer t = timers.remove(clientId);
         if (t != null) t.cancel();
         System.out.println(Util.getTimestamp() + " ProfileManager: Profile " + clientId + " unlocked.");
+
         Queue<String> q = waitingQueues.get(clientId);
         if (q != null && !q.isEmpty()) {
             String next = q.poll();
@@ -80,10 +101,7 @@ public class ProfileManager {
                             new Message(MessageType.DIAGNOSTIC, "Server",
                                     "Profile " + clientId + " is now available."));
                     handler.getOutputStream().flush();
-                } catch (IOException e) {
-                    System.out.println(Util.getTimestamp()
-                            + " ProfileManager: Error notifying client " + next);
-                }
+                } catch (IOException ignored) { }
             }
         }
     }
@@ -173,7 +191,7 @@ public class ProfileManager {
     }
 
     /**
-     * Handle access_profile requests unchanged.
+     * Handle access_profile requests: return actual file contents if allowed.
      */
     public static void handleAccessProfile(Message msg,
                                            String requesterNumericId,
@@ -185,23 +203,34 @@ public class ProfileManager {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                         "Access_profile failed: User '" + targetUsername + "' not found."));
                 output.flush();
-            } catch (IOException e) { e.printStackTrace(); }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             return;
         }
         boolean allowed = SocialGraphManager.getInstance()
                 .isFollowing(requesterNumericId, targetNumericId);
         try {
             if (allowed) {
-                String profileContent = getInstance().getProfile(targetNumericId);
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "Access granted. " + profileContent));
-                System.out.println(Util.getTimestamp() + " ProfileManager: Access granted for requester "
-                        + requesterNumericId + " to profile " + targetNumericId);
+                String fileName = "Profile_" + Constants.GROUP_ID
+                        + "client" + targetNumericId + ".txt";
+                File profileFile = new File(fileName);
+                if (profileFile.exists()) {
+                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Access granted. Profile contents:"));
+                    try (BufferedReader br = new BufferedReader(new FileReader(profileFile))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", line));
+                        }
+                    }
+                } else {
+                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Access granted. Profile is empty."));
+                }
             } else {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "Access denied: You do not follow user '" + targetUsername + "'." ));
-                System.out.println(Util.getTimestamp() + " ProfileManager: Access denied for requester "
-                        + requesterNumericId + " to profile " + targetNumericId);
+                        "Access denied: You do not follow user '" + targetUsername + "'."));
             }
             output.flush();
         } catch (IOException e) {
