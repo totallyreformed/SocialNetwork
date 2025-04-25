@@ -125,13 +125,14 @@ public class ClientHandler implements Runnable {
                 break;
 
             case REPOST:
-                // Now expects payload "targetUsername:postId"
-                String[] repostParts = msg.getPayload().split(":", 2);
-                if (repostParts.length == 2) {
-                    String targetUsername = repostParts[0];
-                    String postId         = repostParts[1];
+                // Expected payload: "target_username:postId"
+                String[] repostTokens = msg.getPayload().split(":", 2);
+                if (repostTokens.length == 2) {
+                    String targetUsername = repostTokens[0];
+                    String postId         = repostTokens[1];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
                     if (targetNumericId != null) {
+                        // Queue the repost notification
                         ProfileManager.handleRepost(msg, clientId, output);
                     } else {
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -144,27 +145,18 @@ public class ClientHandler implements Runnable {
                 break;
 
             case COMMENT:
-                // Now expects payload "targetUsername:postId:commentText"
+                // Expected payload: "target_username:postId:commentText"
                 String[] commentParts = msg.getPayload().split(":", 3);
                 if (commentParts.length == 3) {
                     String targetUsername = commentParts[0];
                     String postId         = commentParts[1];
                     String commentText    = commentParts[2];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
-
                     if (targetNumericId != null) {
-                        ProfileManager.getInstance()
-                                .addCommentToPost(targetNumericId, postId, clientId, commentText);
+                        // Queue the comment (ProfileManager will add notification)
+                        ProfileManager.getInstance().addCommentToPost(targetNumericId, postId, clientId, commentText);
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
                                 "Comment added to post " + postId + " of user " + targetUsername));
-
-                        // Notify original poster if they are online
-                        ClientHandler targetHandler = activeClients.get(targetNumericId);
-                        if (targetHandler != null) {
-                            String commenterName = AuthenticationManager.getUsernameByNumericId(clientId);
-                            targetHandler.sendExternalMessage(new Message(MessageType.DIAGNOSTIC, "Server",
-                                    "New comment on your post " + postId + " from " + commenterName + ": " + commentText));
-                        }
                     } else {
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
                                 "Comment failed: User '" + targetUsername + "' not found."));

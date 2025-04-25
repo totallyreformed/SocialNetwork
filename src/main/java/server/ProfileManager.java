@@ -12,11 +12,9 @@ import java.io.IOException;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.ObjectOutputStream;
-import java.util.Set;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.LinkedList;
-import java.util.Queue;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -191,7 +189,10 @@ public class ProfileManager {
     }
 
     /**
-     * Handle access_profile requests: return actual file contents if allowed.
+     * Handle access_profile requests:
+     * - Verify follow status
+     * - Read Profile_<GROUP_ID>client<targetId>.txt
+     * - Two-pass parse: first collect all comments, then print posts with their comments
      */
     public static void handleAccessProfile(Message msg,
                                            String requesterNumericId,
@@ -208,31 +209,70 @@ public class ProfileManager {
             }
             return;
         }
+
         boolean allowed = SocialGraphManager.getInstance()
                 .isFollowing(requesterNumericId, targetNumericId);
+
         try {
-            if (allowed) {
-                String fileName = "Profile_" + Constants.GROUP_ID
-                        + "client" + targetNumericId + ".txt";
-                File profileFile = new File(fileName);
-                if (profileFile.exists()) {
-                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                            "Access granted. Profile contents:"));
-                    try (BufferedReader br = new BufferedReader(new FileReader(profileFile))) {
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", line));
-                        }
-                    }
-                } else {
-                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                            "Access granted. Profile is empty."));
-                }
-            } else {
+            if (!allowed) {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                         "Access denied: You do not follow user '" + targetUsername + "'."));
+                output.flush();
+                return;
+            }
+
+            String fileName = "Profile_" + Constants.GROUP_ID
+                    + "client" + targetNumericId + ".txt";
+            File profileFile = new File(fileName);
+
+            if (!profileFile.exists() || profileFile.length() == 0) {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Access granted. Profile is empty."));
+                output.flush();
+                return;
+            }
+
+            // Read all lines
+            List<String> lines = Files.readAllLines(profileFile.toPath(), StandardCharsets.UTF_8);
+
+            // First pass: collect comments per postId
+            Map<Integer, List<String>> commentMap = new HashMap<>();
+            for (String line : lines) {
+                if (line.contains("Comment on post ")) {
+                    int idx = line.indexOf("Comment on post ") + "Comment on post ".length();
+                    int end = line.indexOf(' ', idx);
+                    try {
+                        int postId = Integer.parseInt(line.substring(idx, end));
+                        commentMap.computeIfAbsent(postId, k -> new ArrayList<>()).add(line);
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+
+            // Second pass: output posts with their comments
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "Access granted."));
+            for (String line : lines) {
+                if (line.startsWith("PostID:")) {
+                    // Extract postId
+                    int spaceIdx = line.indexOf(' ');
+                    int postId = Integer.parseInt(line.substring("PostID:".length(), spaceIdx));
+                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Uploaded post " + postId + ": " + line));
+
+                    List<String> comms = commentMap.get(postId);
+                    if (comms == null || comms.isEmpty()) {
+                        output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                                "  (no comments)"));
+                    } else {
+                        for (String c : comms) {
+                            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                                    "  " + c));
+                        }
+                    }
+                }
             }
             output.flush();
+
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error handling access_profile: " + e.getMessage());
