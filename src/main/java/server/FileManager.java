@@ -12,11 +12,19 @@ import java.io.FileOutputStream;
 import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class FileManager {
 
-    // Handle file upload: saves the file and caption, and updates the profile.
+    private static ConcurrentHashMap<String, Set<String>> photoOwners = new ConcurrentHashMap<>();
+
+    /**
+     * Handle file upload: saves the file and caption, updates the profile,
+     * notifies followers, and records the owner for search.
+     */
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
         String payload = msg.getPayload();
@@ -37,14 +45,13 @@ public class FileManager {
         }
 
         try {
-            // Ensure the ServerFiles directory exists.
             File dir = new File("ServerFiles");
             if (!dir.exists()) {
                 dir.mkdirs();
                 System.out.println(Util.getTimestamp() + " FileManager: Created ServerFiles directory.");
             }
 
-            // Decode Base64 and save the photo file as binary.
+            // Decode and save the photo binary
             byte[] fileBytes = Base64.getDecoder().decode(base64Data);
             File photoFile = new File(dir, fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
@@ -52,14 +59,19 @@ public class FileManager {
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName + " (Title: " + photoTitle + ")");
 
-            // Save the caption in a .txt file.
+            // Record ownership for search
+            photoOwners
+                    .computeIfAbsent(fileName, k -> ConcurrentHashMap.newKeySet())
+                    .add(clientId);
+
+            // Save the caption
             File captionFile = new File(dir, fileName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
                 fos.write(caption.getBytes());
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
 
-            // Update profile and notifications as before...
+            // Update profile and notify followers
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
             String uploaderUsername = AuthenticationManager.getUsernameByNumericId(clientId);
             String notificationMessage = "User " + uploaderUsername + " uploaded " + photoTitle;
@@ -81,24 +93,41 @@ public class FileManager {
         }
     }
 
-    // Handle file search: returns a diagnostic message based on file existence.
-    public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {
-        System.out.println(Util.getTimestamp() + " FileManager: Processing SEARCH for client " + clientId);
+    /**
+     * Handle file search: returns only those followees who have the photo.
+     */
+    public static void handleSearch(Message msg,
+                                    String clientId,
+                                    ObjectOutputStream output) {
         String photoName = msg.getPayload();
-        File file = new File("ServerFiles/" + photoName);
+
+        // 1) All known owners of this photo
+        Set<String> owners = photoOwners.getOrDefault(photoName, Set.of());
+        // 2) Which of those the requester actually follows
+        Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
+
+        // 3) Filter to only followees
+        Set<String> available = owners.stream()
+                .filter(followees::contains)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
         String result;
-        if (file.exists()) {
-            result = "Found photo " + photoName + ". Owner: " + AuthenticationManager.getUsernameByNumericId(clientId);
-            System.out.println(Util.getTimestamp() + " FileManager: SEARCH found file " + photoName);
+        if (available.isEmpty()) {
+            result = "Search: no followees have photo " + photoName;
         } else {
-            result = "Photo " + photoName + " not found.";
-            System.out.println(Util.getTimestamp() + " FileManager: SEARCH did not find file " + photoName);
+            // map each clientId → "id(username)"
+            String listing = available.stream()
+                    .map(id -> id + "("
+                            + AuthenticationManager.getUsernameByNumericId(id)
+                            + ")")
+                    .collect(Collectors.joining(","));
+            result = "Search: found photo " + photoName + " at: " + listing;
         }
+
         try {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", result));
             output.flush();
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " FileManager: Error sending SEARCH result.");
             e.printStackTrace();
         }
     }

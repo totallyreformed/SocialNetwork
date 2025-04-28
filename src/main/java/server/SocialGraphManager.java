@@ -4,11 +4,8 @@ import common.Message;
 import common.Message.MessageType;
 import common.Util;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.io.*;
-import java.util.Scanner;
 
 public class SocialGraphManager {
     private static SocialGraphManager instance = null;
@@ -51,6 +48,19 @@ public class SocialGraphManager {
         boolean result = followers != null && followers.contains(requesterId);
         System.out.println("SocialGraphManager: isFollowing(" + requesterId + ", " + targetId + ") = " + result);
         return result;
+    }
+
+    /**
+     * Returns the set of clientIds that the given client follows.
+     */
+    public Set<String> getFollowees(String clientId) {
+        Set<String> followees = new HashSet<>();
+        for (Map.Entry<String, Set<String>> e : socialGraph.entrySet()) {
+            if (e.getValue().contains(clientId)) {
+                followees.add(e.getKey());
+            }
+        }
+        return followees;
     }
 
     /**

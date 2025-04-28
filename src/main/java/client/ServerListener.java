@@ -2,6 +2,7 @@ package client;
 
 import java.io.ObjectInputStream;
 import java.io.IOException;
+import java.util.Random;
 
 import common.Message;
 import common.Message.MessageType;
@@ -33,8 +34,32 @@ public class ServerListener implements Runnable {
                 else if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
 
+                    // Handle search results
+                    if (p.startsWith("Search: found photo ")) {
+                        // 1) show the server’s line first
+                        System.out.println(p);
+                        // 2) parse out "<photo> at: id(user),id2(user2),…"
+                        String[] parts = p.split(" at: ");
+                        if (parts.length == 2) {
+                            String file = parts[0].substring("Search: found photo ".length());
+                            String[] owners = parts[1].split(",");
+                            // pick one at random
+                            String chosen = owners[new java.util.Random().nextInt(owners.length)];
+                            System.out.println("Initiating download of " + file
+                                    + " from client " + chosen);
+                            // kick off the download
+                            connection.sendMessage(new Message(
+                                    MessageType.DOWNLOAD,
+                                    connection.getClientId(),
+                                    file));
+                            FileTransferHandler.downloadFile(file, connection);
+                        }
+                    }
+                    else if (p.startsWith("Search: no followees")) {
+                        System.out.println(p);
+                    }
                     // Handle repost‐sync messages
-                    if (p.startsWith("SYNC_REPOST:")) {
+                    else if (p.startsWith("SYNC_REPOST:")) {
                         String entry = p.substring("SYNC_REPOST:".length());
                         profileClientManager.appendRepost(entry);
                         System.out.println("Local Others file updated with repost.");
