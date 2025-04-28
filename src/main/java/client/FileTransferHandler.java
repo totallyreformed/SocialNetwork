@@ -87,6 +87,7 @@ public class FileTransferHandler {
                     break;
 
                 case FILE_END:
+                    System.out.println(msg.getPayload());
                     System.out.println("Download complete. Saving file...");
                     saveDownloadedFile();
                     downloadBuffer.setLength(0);
