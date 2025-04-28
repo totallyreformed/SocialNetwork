@@ -57,7 +57,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void handleMessage(Message msg) {
+    private void handleMessage(Message msg) throws IOException {
         // Enforce login before other commands
         if (msg.getType() != MessageType.SIGNUP
                 && msg.getType() != MessageType.LOGIN
@@ -144,7 +144,7 @@ public class ClientHandler implements Runnable {
                 break;
 
             case DOWNLOAD:
-                FileManager.handleDownload(msg, clientId, input, output);
+                FileManager.handleDownload(msg, clientId, clientSocket, input, output);
                 break;
 
             case ACCESS_PROFILE:

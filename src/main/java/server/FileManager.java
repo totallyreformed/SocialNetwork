@@ -6,12 +6,10 @@ import common.Message.MessageType;
 import common.Constants;
 import common.Util;
 
-import java.io.ObjectOutputStream;
-import java.io.ObjectInputStream;
-import java.io.IOException;
-import java.io.File;
-import java.io.FileOutputStream;
+import java.io.*;
+import java.net.Socket;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -155,159 +153,178 @@ public class FileManager {
      * Handle file download: parses ownerName:imageFile, looks up ownerId, then streams chunks.
      */
     public static void handleDownload(Message msg,
-                                      String clientId,
+                                      String downloaderId,
+                                      Socket clientSocket,
                                       ObjectInputStream input,
-                                      ObjectOutputStream output) {
-        System.out.println(Util.getTimestamp() + " FileManager: Processing DOWNLOAD for client " + clientId);
+                                      ObjectOutputStream output) throws IOException {
+        System.out.println(Util.getTimestamp() + " FileManager: Processing DOWNLOAD for client " + downloaderId);
 
-        // Parse payload as ownerName:photoName
-        String payload = msg.getPayload();
-        String ownerName, photoName;
-        if (payload.contains(":")) {
-            String[] split = payload.split(":", 2);
-            ownerName = split[0];
-            photoName = split[1];
-        } else {
-            // fallback: download from yourself
-            ownerName = AuthenticationManager.getUsernameByNumericId(clientId);
-            photoName = payload;
-        }
+        // 1) Parse ownerName:photoName
+        String[] parts = msg.getPayload().split(":", 2);
+        String ownerName = parts.length == 2 ? parts[0] : AuthenticationManager.getUsernameByNumericId(downloaderId);
+        String photoName = parts.length == 2 ? parts[1] : msg.getPayload();
 
-        // Convert ownerName → ownerId
+        // 2) Resolve ownerName → ownerId
         String ownerId = AuthenticationManager.getClientIdByUsername(ownerName);
         if (ownerId == null) {
-            try {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "Download failed: User '" + ownerName + "' not found."));
-                output.flush();
-            } catch (IOException e) { e.printStackTrace(); }
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "Download failed: User '" + ownerName + "' not found."));
+            output.flush();
             return;
         }
 
-        File dir         = new File("ServerFiles/" + Constants.GROUP_ID + "client" + ownerId);
-        File photoFile   = new File(dir, photoName);
-        File captionFile = new File(dir, photoName + ".txt");
+        // 3) Locate files
+        File ownerDir    = new File("ServerFiles/" + Constants.GROUP_ID + "client" + ownerId);
+        File photoFile   = new File(ownerDir, photoName);
+        File captionFile = new File(ownerDir, photoName + ".txt");
+
+        if (!photoFile.exists()) {
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "File " + photoName + " not found."));
+            output.flush();
+            System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD aborted – file not found.");
+            return;
+        }
+
+        // prepare raw input stream for available()
+        InputStream rawIn = clientSocket.getInputStream();
 
         try {
-            if (!photoFile.exists()) {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "File " + photoName + " not found."));
-                output.flush();
-                System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD aborted – file not found.");
-                return;
-            }
-
-            // --- Handshake ---
+            // 4) 3-way handshake
             output.writeObject(new Message(MessageType.HANDSHAKE, "Server",
                     "Initiate handshake for " + photoName));
             output.flush();
-            System.out.println(Util.getTimestamp() + " FileManager: Handshake initiated for " + photoName);
-
-            long handshakeStart = System.currentTimeMillis();
-            Message ackMsg = null;
-            // Use a dynamic loop waiting up to 5000ms
-            while (System.currentTimeMillis() - handshakeStart < 5000) {
-                try {
-                    ackMsg = (Message) input.readObject();
-                    if (ackMsg.getType() == MessageType.ACK && ackMsg.getPayload().contains("handshake")) {
+            // wait up to 5s for handshake ACK
+            long hsStart = System.currentTimeMillis();
+            Message hsAck = null;
+            while (System.currentTimeMillis() - hsStart < 5000) {
+                if (rawIn.available() > 0) {
+                    hsAck = (Message) input.readObject();
+                    if (hsAck.getType() == MessageType.ACK
+                            && hsAck.getPayload().contains("handshake")) {
                         break;
                     }
-                } catch (IOException ex) {
-                    // Log and continue waiting
-                    System.out.println(Util.getTimestamp() + " FileManager: Exception during handshake waiting: " + ex.getMessage());
-                } catch (ClassNotFoundException e) {
-                    throw new RuntimeException(e);
                 }
             }
-            if (ackMsg == null || ackMsg.getType() != MessageType.ACK || !ackMsg.getPayload().contains("handshake")) {
-                output.writeObject(new Message(MessageType.NACK, "Server", "Handshake failed."));
+            if (hsAck == null || hsAck.getType() != MessageType.ACK) {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Handshake failed."));
                 output.flush();
-                System.out.println(Util.getTimestamp() + " FileManager: Handshake failed, aborting DOWNLOAD.");
                 return;
             }
-            long handshakeRTT = System.currentTimeMillis() - handshakeStart;
-            System.out.println(Util.getTimestamp() + " FileManager: Handshake acknowledged by client. RTT = " + handshakeRTT + " ms");
+            System.out.println(Util.getTimestamp() + " FileManager: Handshake complete");
 
-            // --- Read the file bytes and Base64-encode them ---
-            byte[] fileBytes = Files.readAllBytes(photoFile.toPath());
-            String base64 = Base64.getEncoder().encodeToString(fileBytes);
-            int totalLength = base64.length();
-            int chunkSize = totalLength / Constants.NUM_CHUNKS;
-            if (chunkSize == 0) chunkSize = totalLength;
+            // 5) Prepare Base64 data
+            byte[] bytes  = Files.readAllBytes(photoFile.toPath());
+            String base64 = Base64.getEncoder().encodeToString(bytes);
+            int totalLen  = base64.length();
+            int chunkSize = totalLen / Constants.NUM_CHUNKS;
+            if (chunkSize == 0) chunkSize = totalLen;
 
-            // Send in NUM_CHUNKS chunks
+            // 6) Stop-and-wait with retransmit on timeout
             for (int i = 1; i <= Constants.NUM_CHUNKS; i++) {
                 int start = (i - 1) * chunkSize;
-                int end = (i == Constants.NUM_CHUNKS) ? totalLength : (i * chunkSize);
-                String chunkContent = base64.substring(start, end);
+                int end   = (i == Constants.NUM_CHUNKS) ? totalLen : i * chunkSize;
+                String content = base64.substring(start, end);
+                Message chunkMsg = new Message(MessageType.FILE_CHUNK, "Server",
+                        "Chunk " + i + ": " + content);
 
-                Message chunkMsg = new Message(MessageType.FILE_CHUNK, "Server", "Chunk " + i + ": " + chunkContent);
-
-                // Stop‐and‐wait with retransmissions and diagnostics
-                boolean ackReceived = false;
                 int attempts = 0;
-                long dynamicTimeout = Constants.TIMEOUT_MILLISECONDS;
-                while (!ackReceived && attempts < 3) {
-                    long sendTime = System.currentTimeMillis();
+                long timeout = Constants.TIMEOUT_MILLISECONDS;
+                boolean ackReceived = false;
+
+                while (attempts < 2 && !ackReceived) {
+                    // send chunk
                     output.writeObject(chunkMsg);
                     output.flush();
-                    System.out.println(Util.getTimestamp() + " FileManager: Sent chunk " + i + " (attempt " + (attempts+1) + ")");
-                    // Wait for ACK
-                    Message ack = null;
-                    long waitStart = System.currentTimeMillis();
-                    while (System.currentTimeMillis() - waitStart < dynamicTimeout) {
-                        try {
-                            ack = (Message) input.readObject();
-                            if (ack.getType() == MessageType.ACK && ack.getPayload().contains("Chunk " + i)) {
-                                ackReceived = true;
+                    System.out.println(Util.getTimestamp()
+                            + " FileManager: Sent chunk " + i + " (attempt " + (attempts+1) + ")");
+
+                    // wait for ACK or timeout
+                    long sendTime = System.currentTimeMillis();
+                    while (System.currentTimeMillis() - sendTime < timeout) {
+                        if (rawIn.available() > 0) {
+                            Message resp = (Message) input.readObject();
+                            if (resp.getType() == MessageType.ACK
+                                    && resp.getPayload().contains("Chunk " + i)) {
                                 long rtt = System.currentTimeMillis() - sendTime;
-                                System.out.println(Util.getTimestamp() + " FileManager: ACK received for chunk " + i + " RTT=" + rtt);
-                                // send diagnostic to client
+                                System.out.println(Util.getTimestamp()
+                                        + " FileManager: ACK received for chunk " + i + " RTT=" + rtt + " ms");
+
                                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                                         "ACK received for chunk " + i));
                                 output.flush();
-                                break;
+                                ackReceived = true;
                             }
-                        } catch (IOException | ClassNotFoundException ex) {
-                            // ignore, continue waiting
+                            // ignore any other messages
                         }
+                        if (ackReceived) break;
                     }
+
                     if (!ackReceived) {
+                        // timeout expired without ACK → retransmit
                         attempts++;
-                        System.out.println(Util.getTimestamp() + " FileManager: Timeout waiting for ACK for chunk " + i);
+                        System.out.println(Util.getTimestamp()
+                                + " FileManager: Server did not receive ACK for chunk " + i
+                                + " — retransmitting");
                         output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                                "Server did not receive ACK for chunk " + i + "—retransmitting"));
+                                "Server did not receive ACK for chunk " + i
+                                        + " — retransmitting"));
                         output.flush();
-                        dynamicTimeout *= 2;
-                    }
-                    if (attempts >= 3 && !ackReceived) {
-                        output.writeObject(new Message(MessageType.NACK, "Server", "Download aborted at chunk " + i));
-                        output.flush();
-                        return;
                     }
                 }
+
+                if (!ackReceived) {
+                    output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                            "Download aborted at chunk " + i));
+                    output.flush();
+                    return;
+                }
+
+                // if there’s a delayed second ACK for the same chunk, it will be read by the next iteration’s rawIn.available() but ignored
             }
 
-            // --- Caption and final diagnostics ---
+            // 7) Send caption or no-caption
             if (captionFile.exists()) {
-                String captionText = new String(Files.readAllBytes(captionFile.toPath()));
+                String cap = new String(Files.readAllBytes(captionFile.toPath()));
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "Caption: " + captionText));
+                        "Caption: " + cap));
             } else {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                         "No caption available"));
             }
             output.flush();
 
-            // Final complete message
+            // 8) Final completion
             output.writeObject(new Message(MessageType.FILE_END, "Server",
                     "The transmission is completed"));
             output.flush();
-            System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD completed successfully for " + photoName);
+            System.out.println(Util.getTimestamp()
+                    + " FileManager: DOWNLOAD completed successfully for " + photoName);
 
-        } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " FileManager: Exception during DOWNLOAD: " + e.getMessage());
-            e.printStackTrace();
+            // 9) Server-side synchronisation
+            File syncDir = new File("ServerFiles/" + Constants.GROUP_ID
+                    + "client" + downloaderId);
+            if (!syncDir.exists()) syncDir.mkdirs();
+            Files.copy(photoFile.toPath(),
+                    new File(syncDir, photoName).toPath(),
+                    StandardCopyOption.REPLACE_EXISTING);
+            if (captionFile.exists()) {
+                Files.copy(captionFile.toPath(),
+                        new File(syncDir, photoName + ".txt").toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+            photoOwners
+                    .computeIfAbsent(photoName, k -> ConcurrentHashMap.newKeySet())
+                    .add(downloaderId);
+
+        } catch (ClassNotFoundException ex) {
+            ex.printStackTrace();
         }
+    }
+
+    // Helper to send a DIAGNOSTIC
+    private static void sendDiagnostic(ObjectOutputStream out, String msg) throws IOException {
+        out.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", msg));
+        out.flush();
     }
 }
