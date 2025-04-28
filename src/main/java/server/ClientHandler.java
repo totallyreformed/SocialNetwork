@@ -79,13 +79,17 @@ public class ClientHandler implements Runnable {
                         username = providedUsername;
                         activeClients.put(clientId, this);
 
-                        // ** Register IP and port **
+                        // Register IP and port
                         String address = clientSocket.getInetAddress().getHostAddress()
                                 + ":" + clientSocket.getPort();
                         clientAddressMap.put(clientId, address);
 
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId,
-                                "Signup successful. Your client id is " + clientId));
+                        // Welcome message showing both username and ID
+                        sendMessage(new Message(
+                                MessageType.AUTH_SUCCESS,
+                                clientId,
+                                "Welcome " + username + " (ClientID: " + clientId + ")"
+                        ));
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
                                 "Signup failed: Username already exists."));
@@ -108,12 +112,18 @@ public class ClientHandler implements Runnable {
                         username = providedUsername;
                         activeClients.put(clientId, this);
 
-                        // ** Register IP and port **
+                        // Register IP and port
                         String address = clientSocket.getInetAddress().getHostAddress()
                                 + ":" + clientSocket.getPort();
                         clientAddressMap.put(clientId, address);
 
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome client " + clientId));
+                        // Welcome back message with username and ID
+                        sendMessage(new Message(
+                                MessageType.AUTH_SUCCESS,
+                                clientId,
+                                "Welcome back " + username + " (ClientID: " + clientId + ")"
+                        ));
+
                         // Replay any pending notifications
                         for (String notification : NotificationManager.getInstance().getNotifications(clientId)) {
                             sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",

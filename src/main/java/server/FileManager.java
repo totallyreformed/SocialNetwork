@@ -21,10 +21,12 @@ import java.util.stream.Collectors;
 public class FileManager {
 
     private static ConcurrentHashMap<String, Set<String>> photoOwners = new ConcurrentHashMap<>();
+    private static ConcurrentHashMap<String, Set<String>> titleOwners = new ConcurrentHashMap<>();
+    private static ConcurrentHashMap<String, String> titleToFileName = new ConcurrentHashMap<>();
 
     /**
      * Handle file upload: saves into per-client subdir, updates profile,
-     * notifies followers, and records the owner for search.
+     * notifies followers, and records the owner for both filename and title search.
      */
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
@@ -58,10 +60,18 @@ public class FileManager {
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName);
 
-            // Record ownership for search
+            // Record ownership for filename-based search
             photoOwners
                     .computeIfAbsent(fileName, k -> ConcurrentHashMap.newKeySet())
                     .add(clientId);
+
+            // Record ownership for title-based search (case-insensitive)
+            String key = photoTitle.trim().toLowerCase();
+            titleOwners
+                    .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet())
+                    .add(clientId);
+            // Map title → fileName (latest upload wins, or first one)
+            titleToFileName.putIfAbsent(key, fileName);
 
             // Save the caption
             File captionFile = new File(dir, fileName + ".txt");
@@ -82,8 +92,11 @@ public class FileManager {
             }
 
             // Send success diagnostic
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                    "Upload successful for " + fileName));
+            output.writeObject(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    "Upload successful for " + fileName
+            ));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: UPLOAD completed for client " + clientId);
 
@@ -94,25 +107,40 @@ public class FileManager {
     }
 
     /**
-     * Handle file search: returns only those followees who have the photo.
+     * Handle file search: first tries title lookup, then falls back to filename lookup.
+     * Returns the actual fileName in the diagnostic so that downloads use the correct name.
      */
-    public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {
-        String photoName = msg.getPayload();
-        Set<String> owners   = photoOwners.getOrDefault(photoName, Set.of());
-        Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
+    public static void handleSearch(Message msg,
+                                    String clientId,
+                                    ObjectOutputStream output) {
+        String query    = msg.getPayload().trim();
+        String key      = query.toLowerCase();
+        String fileName = titleToFileName.get(key);
 
+        Set<String> owners;
+        if (fileName != null) {
+            // title match
+            owners = titleOwners.getOrDefault(key, Set.of());
+        } else {
+            // fallback: interpret query as a filename
+            fileName = query;
+            owners   = photoOwners.getOrDefault(fileName, Set.of());
+        }
+
+        // Filter to only followees
+        Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
         Set<String> available = owners.stream()
                 .filter(followees::contains)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
         String result;
         if (available.isEmpty()) {
-            result = "Search: no followees have photo " + photoName;
+            result = "Search: no followees have photo " + query;
         } else {
             String listing = available.stream()
                     .map(id -> id + "(" + AuthenticationManager.getUsernameByNumericId(id) + ")")
                     .collect(Collectors.joining(","));
-            result = "Search: found photo " + photoName + " at: " + listing;
+            result = "Search: found photo " + fileName + " at: " + listing;
         }
 
         try {

@@ -41,8 +41,8 @@ public class CommandHandler {
         System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>\n");
         System.out.println("4. download:        Format -> download ownerName:filename");
         System.out.println("   Example:         download alice:beach.jpg\n");
-        System.out.println("5. search:          Format -> search <filename>");
-        System.out.println("   Example:         search image.jpg\n");
+        System.out.println("5. search:          Format -> search <photoTitle>");
+        System.out.println("   Example:         search Acropolis\n");
         System.out.println("6. follow:          Format -> follow <target_username>");
         System.out.println("   Example:         follow alice\n");
         System.out.println("7. unfollow:        Format -> unfollow <target_username>");
