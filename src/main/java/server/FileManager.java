@@ -1,15 +1,16 @@
+// File: server/FileManager.java
 package server;
 
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
 import common.Util;
+
 import java.io.ObjectOutputStream;
 import java.io.ObjectInputStream;
 import java.io.IOException;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.util.Base64;
 import java.util.LinkedHashSet;
@@ -22,17 +23,14 @@ public class FileManager {
     private static ConcurrentHashMap<String, Set<String>> photoOwners = new ConcurrentHashMap<>();
 
     /**
-     * Handle file upload: saves the file and caption, updates the profile,
+     * Handle file upload: saves into per-client subdir, updates profile,
      * notifies followers, and records the owner for search.
      */
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
         String payload = msg.getPayload();
         String[] parts = payload.split("\\|");
-        String photoTitle = "";
-        String fileName = "";
-        String caption = "";
-        String base64Data = "";
+        String photoTitle = "", fileName = "", caption = "", base64Data = "";
         for (String part : parts) {
             if (part.startsWith("photoTitle:"))
                 photoTitle = part.substring("photoTitle:".length());
@@ -45,10 +43,11 @@ public class FileManager {
         }
 
         try {
-            File dir = new File("ServerFiles");
+            // Per-client upload directory
+            File dir = new File("ServerFiles/" + Constants.GROUP_ID + "client" + clientId);
             if (!dir.exists()) {
                 dir.mkdirs();
-                System.out.println(Util.getTimestamp() + " FileManager: Created ServerFiles directory.");
+                System.out.println(Util.getTimestamp() + " FileManager: Created directory " + dir.getPath());
             }
 
             // Decode and save the photo binary
@@ -57,7 +56,7 @@ public class FileManager {
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(fileBytes);
             }
-            System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName + " (Title: " + photoTitle + ")");
+            System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName);
 
             // Record ownership for search
             photoOwners
@@ -74,16 +73,17 @@ public class FileManager {
             // Update profile and notify followers
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
             String uploaderUsername = AuthenticationManager.getUsernameByNumericId(clientId);
-            String notificationMessage = "User " + uploaderUsername + " uploaded " + photoTitle;
+            String notification = "User " + uploaderUsername + " uploaded " + photoTitle;
             Set<String> followers = SocialGraphManager.getInstance().getFollowers(clientId);
             if (followers != null) {
-                for (String followerId : followers) {
-                    NotificationManager.getInstance().addNotification(followerId, notificationMessage);
+                for (String f : followers) {
+                    NotificationManager.getInstance().addNotification(f, notification);
                 }
             }
 
             // Send success diagnostic
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Upload successful for " + fileName));
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                    "Upload successful for " + fileName));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: UPLOAD completed for client " + clientId);
 
@@ -96,17 +96,11 @@ public class FileManager {
     /**
      * Handle file search: returns only those followees who have the photo.
      */
-    public static void handleSearch(Message msg,
-                                    String clientId,
-                                    ObjectOutputStream output) {
+    public static void handleSearch(Message msg, String clientId, ObjectOutputStream output) {
         String photoName = msg.getPayload();
-
-        // 1) All known owners of this photo
-        Set<String> owners = photoOwners.getOrDefault(photoName, Set.of());
-        // 2) Which of those the requester actually follows
+        Set<String> owners   = photoOwners.getOrDefault(photoName, Set.of());
         Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
 
-        // 3) Filter to only followees
         Set<String> available = owners.stream()
                 .filter(followees::contains)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -115,11 +109,8 @@ public class FileManager {
         if (available.isEmpty()) {
             result = "Search: no followees have photo " + photoName;
         } else {
-            // map each clientId → "id(username)"
             String listing = available.stream()
-                    .map(id -> id + "("
-                            + AuthenticationManager.getUsernameByNumericId(id)
-                            + ")")
+                    .map(id -> id + "(" + AuthenticationManager.getUsernameByNumericId(id) + ")")
                     .collect(Collectors.joining(","));
             result = "Search: found photo " + photoName + " at: " + listing;
         }
@@ -132,25 +123,55 @@ public class FileManager {
         }
     }
 
-    // Handle file download with Base64‐split into text chunks.
-    public static void handleDownload(Message msg, String clientId,
-                                      ObjectInputStream input, ObjectOutputStream output) {
+    /**
+     * Handle file download: parses ownerName:imageFile, looks up ownerId, then streams chunks.
+     */
+    public static void handleDownload(Message msg,
+                                      String clientId,
+                                      ObjectInputStream input,
+                                      ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing DOWNLOAD for client " + clientId);
-        String photoName = msg.getPayload();
-        File dir = new File("ServerFiles");
-        File photoFile = new File(dir, photoName);
+
+        // Parse payload as ownerName:photoName
+        String payload = msg.getPayload();
+        String ownerName, photoName;
+        if (payload.contains(":")) {
+            String[] split = payload.split(":", 2);
+            ownerName = split[0];
+            photoName = split[1];
+        } else {
+            // fallback: download from yourself
+            ownerName = AuthenticationManager.getUsernameByNumericId(clientId);
+            photoName = payload;
+        }
+
+        // Convert ownerName → ownerId
+        String ownerId = AuthenticationManager.getClientIdByUsername(ownerName);
+        if (ownerId == null) {
+            try {
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Download failed: User '" + ownerName + "' not found."));
+                output.flush();
+            } catch (IOException e) { e.printStackTrace(); }
+            return;
+        }
+
+        File dir         = new File("ServerFiles/" + Constants.GROUP_ID + "client" + ownerId);
+        File photoFile   = new File(dir, photoName);
         File captionFile = new File(dir, photoName + ".txt");
 
         try {
             if (!photoFile.exists()) {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "File " + photoName + " not found."));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "File " + photoName + " not found."));
                 output.flush();
                 System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD aborted – file not found.");
                 return;
             }
 
             // --- Handshake ---
-            output.writeObject(new Message(MessageType.HANDSHAKE, "Server", "Initiate handshake for " + photoName));
+            output.writeObject(new Message(MessageType.HANDSHAKE, "Server",
+                    "Initiate handshake for " + photoName));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: Handshake initiated for " + photoName);
 
@@ -242,14 +263,17 @@ public class FileManager {
             // --- Caption and final diagnostics ---
             if (captionFile.exists()) {
                 String captionText = new String(Files.readAllBytes(captionFile.toPath()));
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Caption: " + captionText));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Caption: " + captionText));
             } else {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "No caption available"));
+                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "No caption available"));
             }
             output.flush();
 
             // Final complete message
-            output.writeObject(new Message(MessageType.FILE_END, "Server", "The transmission is completed"));
+            output.writeObject(new Message(MessageType.FILE_END, "Server",
+                    "The transmission is completed"));
             output.flush();
             System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD completed successfully for " + photoName);
 

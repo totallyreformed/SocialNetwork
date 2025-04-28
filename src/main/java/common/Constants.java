@@ -13,5 +13,5 @@ public class Constants {
 
     // --------------------------------------------------------------------
     // Replace "<YOUR_GROUP_ID>" with your actual group number.
-    public static final String GROUP_ID = "40";
+    public static final String GROUP_ID = "34";
 }

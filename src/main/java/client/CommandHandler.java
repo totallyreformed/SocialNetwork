@@ -1,4 +1,4 @@
-// client/CommandHandler.java
+// File: client/CommandHandler.java
 package client;
 
 import java.util.Scanner;
@@ -39,8 +39,8 @@ public class CommandHandler {
         System.out.println("   Example:         login john:pass123\n");
         System.out.println("3. upload:          Format -> upload photoTitle:<filename> <caption>");
         System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>\n");
-        System.out.println("4. download:        Format -> download <filename>");
-        System.out.println("   Example:         download image.jpg\n");
+        System.out.println("4. download:        Format -> download ownerName:filename");
+        System.out.println("   Example:         download alice:beach.jpg\n");
         System.out.println("5. search:          Format -> search <filename>");
         System.out.println("   Example:         search image.jpg\n");
         System.out.println("6. follow:          Format -> follow <target_username>");
@@ -60,12 +60,10 @@ public class CommandHandler {
     }
 
     private void processCommand(String input) {
-        // Split command and payload.
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
         String payload = parts.length > 1 ? parts[1].trim() : "";
 
-        // Ensure user is logged in for commands beyond signup/login.
         if (!command.equals("signup") &&
                 !command.equals("login") &&
                 connection.getClientId().equals("clientID_placeholder")) {
@@ -77,65 +75,69 @@ public class CommandHandler {
             case "signup":
                 connection.sendMessage(new Message(MessageType.SIGNUP, connection.getClientId(), payload));
                 break;
+
             case "login":
                 connection.sendMessage(new Message(MessageType.LOGIN, connection.getClientId(), payload));
                 break;
+
             case "upload":
                 processUploadCommand(payload, connection.getClientId());
                 break;
+
             case "download":
-                connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), payload));
-                FileTransferHandler.downloadFile(payload, connection);
+                if (payload.contains(":")) {
+                    connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), payload));
+                    FileTransferHandler.downloadFile(payload, connection);
+                } else {
+                    System.out.println("Download command format invalid. Usage: download ownerName:filename");
+                }
                 break;
+
             case "search":
                 connection.sendMessage(new Message(MessageType.SEARCH, connection.getClientId(), payload));
                 break;
+
             case "follow":
                 connection.sendMessage(new Message(MessageType.FOLLOW, connection.getClientId(), payload));
                 break;
+
             case "unfollow":
                 connection.sendMessage(new Message(MessageType.UNFOLLOW, connection.getClientId(), payload));
                 break;
+
             case "access_profile":
                 connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, connection.getClientId(), payload));
                 break;
+
             case "respondfollow":
                 connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, connection.getClientId(), payload));
                 break;
+
             case "repost":
-                // Now expects: targetUsername:postId
                 String[] repostTokens = payload.split(":", 2);
                 if (repostTokens.length == 2) {
-                    String targetUsername = repostTokens[0].trim();
-                    String postId         = repostTokens[1].trim();
-                    String newPayload     = targetUsername + ":" + postId;
-                    connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), newPayload));
+                    connection.sendMessage(new Message(MessageType.REPOST, connection.getClientId(), payload));
                 } else {
                     System.out.println("Repost command format invalid. Usage: repost <target_username>:<postId>");
                 }
                 break;
+
             case "comment":
-                // Now expects: targetUsername:postId:commentText
                 String[] commentTokens = payload.split(":", 3);
                 if (commentTokens.length == 3) {
-                    String targetUsername = commentTokens[0].trim();
-                    String postId         = commentTokens[1].trim();
-                    String commentText    = commentTokens[2].trim();
-                    String newPayload     = targetUsername + ":" + postId + ":" + commentText;
-                    connection.sendMessage(new Message(MessageType.COMMENT, connection.getClientId(), newPayload));
+                    connection.sendMessage(new Message(MessageType.COMMENT, connection.getClientId(), payload));
                 } else {
                     System.out.println("Comment command format invalid. Usage: comment <target_username>:<postId>:<comment text>");
                 }
                 break;
+
             default:
                 System.out.println("Unknown command. Please refer to the command list below:");
                 printCommandList();
-                break;
         }
     }
 
     private void processUploadCommand(String payload, String clientId) {
-        // New expected format: <photoTitle>:<fileName> <caption>
         Pattern pattern = Pattern.compile("^([^:]+):(\\S+)\\s+<(.+)>$");
         Matcher matcher = pattern.matcher(payload);
         if (matcher.find()) {
@@ -157,7 +159,6 @@ public class CommandHandler {
         } else {
             System.out.println("Upload command format invalid.");
             System.out.println("Usage: upload <photoTitle>:<fileName> <caption>");
-            System.out.println("Example: upload myVacation:beach.jpg <Had an amazing time at the beach>");
         }
     }
 }
