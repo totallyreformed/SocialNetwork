@@ -1,4 +1,4 @@
-// server/ClientHandler.java
+// File: server/ClientHandler.java
 package server;
 
 import java.net.Socket;
@@ -21,6 +21,9 @@ public class ClientHandler implements Runnable {
     // All active connections, keyed by numeric client ID
     public static ConcurrentHashMap<String, ClientHandler> activeClients = new ConcurrentHashMap<>();
 
+    // Registry mapping clientID → "ip:port"
+    public static ConcurrentHashMap<String, String> clientAddressMap = new ConcurrentHashMap<>();
+
     public ClientHandler(Socket socket) {
         this.clientSocket = socket;
         System.out.println("ClientHandler: New instance created for socket " + socket.getInetAddress());
@@ -31,7 +34,7 @@ public class ClientHandler implements Runnable {
         try {
             output = new ObjectOutputStream(clientSocket.getOutputStream());
             input  = new ObjectInputStream(clientSocket.getInputStream());
-            System.out.println("ClientHandler: Streams established.");
+            System.out.println("ClientHandler: Streams established for " + clientSocket.getInetAddress());
 
             Message msg;
             while ((msg = (Message) input.readObject()) != null) {
@@ -41,7 +44,15 @@ public class ClientHandler implements Runnable {
         } catch (IOException | ClassNotFoundException e) {
             System.out.println("ClientHandler: Error or disconnection: " + e.getMessage());
         } finally {
-            try { clientSocket.close(); } catch (IOException e) { }
+            // Clean up registry entries on disconnect
+            if (clientId != null) {
+                activeClients.remove(clientId);
+                clientAddressMap.remove(clientId);
+                System.out.println("ClientHandler: Removed client " + clientId + " from registry");
+            }
+            try {
+                clientSocket.close();
+            } catch (IOException e) { }
             System.out.println("ClientHandler: Socket closed for client " + clientId);
         }
     }
@@ -67,12 +78,21 @@ public class ClientHandler implements Runnable {
                         clientId = newClientId;
                         username = providedUsername;
                         activeClients.put(clientId, this);
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Signup successful. Your client id is " + clientId));
+
+                        // ** Register IP and port **
+                        String address = clientSocket.getInetAddress().getHostAddress()
+                                + ":" + clientSocket.getPort();
+                        clientAddressMap.put(clientId, address);
+
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId,
+                                "Signup successful. Your client id is " + clientId));
                     } else {
-                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Username already exists."));
+                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
+                                "Signup failed: Username already exists."));
                     }
                 } else {
-                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Signup failed: Invalid format. Use username:password."));
+                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
+                            "Signup failed: Invalid format. Use username:password."));
                 }
                 break;
 
@@ -87,16 +107,25 @@ public class ClientHandler implements Runnable {
                         clientId = loginClientId;
                         username = providedUsername;
                         activeClients.put(clientId, this);
-                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome back " + username));
-                        // Retrieve and send any pending notifications.
+
+                        // ** Register IP and port **
+                        String address = clientSocket.getInetAddress().getHostAddress()
+                                + ":" + clientSocket.getPort();
+                        clientAddressMap.put(clientId, address);
+
+                        sendMessage(new Message(MessageType.AUTH_SUCCESS, clientId, "Welcome client " + clientId));
+                        // Replay any pending notifications
                         for (String notification : NotificationManager.getInstance().getNotifications(clientId)) {
-                            sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Notification: " + notification));
+                            sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                                    "Notification: " + notification));
                         }
                     } else {
-                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Incorrect credentials."));
+                        sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
+                                "Login failed: Incorrect credentials."));
                     }
                 } else {
-                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server", "Login failed: Invalid format. Use username:password."));
+                    sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
+                            "Login failed: Invalid format. Use username:password."));
                 }
                 break;
 
@@ -172,7 +201,8 @@ public class ClientHandler implements Runnable {
                 break;
 
             default:
-                sendMessage(new Message(MessageType.DIAGNOSTIC, "Server", "Unknown command: " + msg.getType()));
+                sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
+                        "Unknown command: " + msg.getType()));
                 break;
         }
     }
@@ -188,7 +218,12 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Exposed for notifying clients asynchronously
+    // Expose registry lookup
+    public static String getClientAddress(String clientId) {
+        return clientAddressMap.get(clientId);
+    }
+
+    // For asynchronously sending messages
     public ObjectOutputStream getOutputStream() {
         return output;
     }
