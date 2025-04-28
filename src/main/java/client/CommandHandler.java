@@ -99,6 +99,9 @@ public class CommandHandler {
             case "access_profile":
                 connection.sendMessage(new Message(MessageType.ACCESS_PROFILE, connection.getClientId(), payload));
                 break;
+            case "respondfollow":
+                connection.sendMessage(new Message(MessageType.FOLLOW_RESPONSE, connection.getClientId(), payload));
+                break;
             case "repost":
                 // Now expects: targetUsername:postId
                 String[] repostTokens = payload.split(":", 2);

@@ -2,6 +2,8 @@ package server;
 
 import common.Message;
 import common.Message.MessageType;
+import common.Util;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
@@ -53,103 +55,165 @@ public class SocialGraphManager {
 
     /**
      * Handles a follow request.
-     * The payload contains the target’s username.
-     * Instead of automatic acceptance, a FOLLOW_REQUEST message is sent to the target client.
+     * Notifies the target (immediately if online, or upon next login) and
+     * confirms to the requester.
      */
     public void handleFollow(Message msg) {
+        String requesterNumericId = msg.getSenderId();
+        String requesterUsername = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
         String targetUsername = msg.getPayload();
-        // Convert target username to numeric ID.
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
-            System.out.println("SocialGraphManager: Follow request error – target username '" + targetUsername + "' not found.");
+            System.out.println(Util.getTimestamp() + " SocialGraphManager: Follow request error – target username '" + targetUsername + "' not found.");
             return;
         }
-        String requesterNumericId = msg.getSenderId();
-        // Get requester username for logging.
-        String requesterUsername = getUsernameByNumericId(requesterNumericId);
-        String requestPayload = requesterUsername + ":" + requesterNumericId;
-        Message followRequest = new Message(MessageType.FOLLOW_REQUEST, "Server", requestPayload);
-        // Lookup target's active ClientHandler.
+
+        // Queue a notification for the target so they see it when they log in
+        NotificationManager.getInstance().addNotification(
+                targetNumericId,
+                "User " + requesterUsername + " requested to follow you"
+        );
+
+        // Confirm to requester
+        ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
+        if (requesterHandler != null) {
+            requesterHandler.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    "Follow request sent to " + targetUsername
+            ));
+        }
+
+        // If the target is online, send the real-time follow request prompt
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
         if (targetHandler != null) {
+            Message followRequest = new Message(
+                    MessageType.FOLLOW_REQUEST,
+                    "Server",
+                    requesterUsername + ":" + requesterNumericId
+            );
             try {
                 targetHandler.getOutputStream().writeObject(followRequest);
                 targetHandler.getOutputStream().flush();
-                System.out.println("SocialGraphManager: Sent FOLLOW_REQUEST to target (" + targetUsername + "). Awaiting response.");
+                System.out.println(Util.getTimestamp() + " SocialGraphManager: Sent FOLLOW_REQUEST to " + targetUsername);
             } catch (IOException e) {
-                System.out.println("SocialGraphManager: Error sending FOLLOW_REQUEST to target: " + e.getMessage());
+                System.out.println(Util.getTimestamp() + " SocialGraphManager: Error sending FOLLOW_REQUEST to target: " + e.getMessage());
             }
         } else {
-            System.out.println("SocialGraphManager: Target (" + targetUsername + ") not online. Cannot send follow request.");
+            System.out.println(Util.getTimestamp() + " SocialGraphManager: Target (" + targetUsername + ") not online. Notification queued.");
         }
     }
 
     /**
      * Handles a follow response from the target client.
-     * Expected payload format: "requesterUsername:decision" where decision is one of:
-     * reciprocate, accept, or reject.
+     * Expected payload format: "requesterUsername:decision"
      */
     public void handleFollowResponse(Message msg) {
         String payload = msg.getPayload();
-        String[] parts = payload.split(":");
+        String[] parts = payload.split(":", 2);
         if (parts.length != 2) {
             System.out.println("SocialGraphManager: FOLLOW_RESPONSE received with invalid format.");
             return;
         }
+
         String requesterUsername = parts[0];
         String decision = parts[1].toLowerCase();
         String requesterNumericId = AuthenticationManager.getClientIdByUsername(requesterUsername);
         if (requesterNumericId == null) {
-            System.out.println("SocialGraphManager: FOLLOW_RESPONSE error – requester username '" + requesterUsername + "' not found.");
+            System.out.println("SocialGraphManager: FOLLOW_RESPONSE error – requester username '"
+                    + requesterUsername + "' not found.");
             return;
         }
+
         String targetNumericId = msg.getSenderId();
         String targetUsername = AuthenticationManager.getUsernameByNumericId(targetNumericId);
-        System.out.println("SocialGraphManager: FOLLOW_RESPONSE from target " + targetUsername + " for requester " + requesterUsername + " with decision: " + decision);
-        switch(decision) {
+
+        String requesterNotification;
+        String targetConfirmation;
+
+        switch (decision) {
             case "reciprocate":
                 socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
                 socialGraph.get(targetNumericId).add(requesterNumericId);
                 socialGraph.putIfAbsent(requesterNumericId, new HashSet<>());
                 socialGraph.get(requesterNumericId).add(targetNumericId);
+                requesterNotification = "User " + targetUsername + " reciprocated your follow request";
+                targetConfirmation  = "You have reciprocated the follow request from " + requesterUsername;
                 break;
+
             case "accept":
                 socialGraph.putIfAbsent(targetNumericId, new HashSet<>());
                 socialGraph.get(targetNumericId).add(requesterNumericId);
+                requesterNotification = "User " + targetUsername + " accepted your follow request";
+                targetConfirmation  = "You have accepted the follow request from " + requesterUsername;
                 break;
+
             case "reject":
-                // Do nothing.
+                requesterNotification = "User " + targetUsername + " rejected your follow request";
+                targetConfirmation  = "You have rejected the follow request from " + requesterUsername;
                 break;
+
             default:
                 System.out.println("SocialGraphManager: FOLLOW_RESPONSE received with unknown decision.");
-                break;
+                return;
+        }
+
+        // Queue notification for the requester; delivered upon their next login
+        NotificationManager.getInstance().addNotification(requesterNumericId, requesterNotification);
+
+        // Immediate confirmation to the target (responder)
+        ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
+        if (targetHandler != null) {
+            targetHandler.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    targetConfirmation
+            ));
         }
     }
 
-
-    // Handles unfollow requests where the payload contains the target's username.
+    /**
+     * Handles an unfollow request.
+     * Updates the graph, notifies the requester immediately, and queues a notification
+     * for the target.
+     */
     public void handleUnfollow(Message msg) {
+        String requesterNumericId = msg.getSenderId();
+        String requesterUsername = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
         String targetUsername = msg.getPayload();
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
-            System.out.println("SocialGraphManager: Unfollow request error – target username '" + targetUsername + "' not found.");
+            System.out.println(Util.getTimestamp() + " SocialGraphManager: Unfollow request error – target username '" + targetUsername + "' not found.");
             return;
         }
-        String requesterNumericId = msg.getSenderId();
 
-        // Remove the requester from the target's followers.
+        // Remove requester from target's followers
         Set<String> targetFollowers = socialGraph.get(targetNumericId);
-        if (targetFollowers != null) {
-            targetFollowers.remove(requesterNumericId);
-            System.out.println("SocialGraphManager: Client " + requesterNumericId + " unfollowed target " + targetNumericId + " (username: " + targetUsername + ")");
+        if (targetFollowers != null && targetFollowers.remove(requesterNumericId)) {
+            System.out.println(Util.getTimestamp() + " SocialGraphManager: " + requesterUsername + " unfollowed " + targetUsername);
         }
 
-        // Additionally, remove the target from the requester's followers to break mutual follow, if present.
+        // Also remove mutual follow if present
         Set<String> requesterFollowers = socialGraph.get(requesterNumericId);
-        if (requesterFollowers != null && requesterFollowers.contains(targetNumericId)) {
-            requesterFollowers.remove(targetNumericId);
-            System.out.println("SocialGraphManager: Also removed target " + targetNumericId + " from requester " + requesterNumericId + "'s follower list.");
+        if (requesterFollowers != null && requesterFollowers.remove(targetNumericId)) {
+            System.out.println(Util.getTimestamp() + " SocialGraphManager: Also removed " + targetUsername + " from " + requesterUsername + "'s followers.");
         }
+
+        // Notify the requester
+        ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
+        if (requesterHandler != null) {
+            requesterHandler.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    "You have unfollowed " + targetUsername
+            ));
+        }
+
+        // Queue notification for the target
+        NotificationManager.getInstance().addNotification(
+                targetNumericId,
+                "User " + requesterUsername + " unfollowed you"
+        );
     }
 
     // Improved search: checks for file existence in the ServerFiles directory.
