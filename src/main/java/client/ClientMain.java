@@ -5,6 +5,11 @@ public class ClientMain {
         ServerConnection connection = new ServerConnection();
         if (connection.connect()) {
             System.out.println("Connected to server.");
+
+            // Start automatic directory‐sync
+            FileSyncManager sync = new FileSyncManager("ClientFiles", connection);
+            sync.startWatcher();
+
             CommandHandler handler = new CommandHandler(connection);
             handler.start();
         } else {

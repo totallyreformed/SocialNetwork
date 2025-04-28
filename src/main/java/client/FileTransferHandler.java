@@ -6,6 +6,8 @@ import common.Message.MessageType;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Base64;
 
 public class FileTransferHandler {
@@ -38,16 +40,16 @@ public class FileTransferHandler {
                     connection.sendMessage(new Message(
                             MessageType.ACK,
                             connection.getClientId(),
-                            "handshake ACK"));
+                            "handshake ACK"
+                    ));
                     break;
                 }
                 case FILE_CHUNK: {
                     String payload = msg.getPayload();
                     String[] parts = payload.split(":", 2);
                     if (parts.length < 2) break;
-                    String chunkLabel = parts[0].trim();    // e.g., "Chunk 3"
-                    // Trim whitespace around the base64 text
-                    String chunkContent = parts[1].trim();
+                    String chunkLabel = parts[0].trim();   // e.g., "Chunk 3"
+                    String chunkContent = parts[1].trim(); // base64 content
 
                     int chunkNum = -1;
                     try {
@@ -63,7 +65,8 @@ public class FileTransferHandler {
                         connection.sendMessage(new Message(
                                 MessageType.ACK,
                                 connection.getClientId(),
-                                "ACK for " + chunkLabel));
+                                "ACK for " + chunkLabel
+                        ));
                         chunk3Delayed = true;
                     }
                     else if (chunkNum == 6 && !chunk6Delayed) {
@@ -72,52 +75,88 @@ public class FileTransferHandler {
                         connection.sendMessage(new Message(
                                 MessageType.ACK,
                                 connection.getClientId(),
-                                "ACK for " + chunkLabel));
+                                "ACK for " + chunkLabel
+                        ));
                         chunk6Delayed = true;
                     }
                     else {
                         connection.sendMessage(new Message(
                                 MessageType.ACK,
                                 connection.getClientId(),
-                                "ACK for " + chunkLabel));
+                                "ACK for " + chunkLabel
+                        ));
                     }
 
-                    // Append the cleaned base64 chunk to the buffer.
                     downloadBuffer.append(chunkContent);
                     break;
                 }
-                case FILE_END:
+                case FILE_END: {
                     System.out.println("Download complete. Saving file...");
                     saveDownloadedFile();
+
+                    // 2️⃣ Print the server’s “transmission completed” message:
+                    System.out.println(msg.getPayload());
+
+                    // 1️⃣ Auto–resync the just‐downloaded file back to the server:
+                    try {
+                        byte[] fileBytes = Files.readAllBytes(
+                                Paths.get("ClientFiles", currentDownloadFile)
+                        );
+                        String b64 = Base64.getEncoder().encodeToString(fileBytes);
+
+                        String title = currentDownloadFile;
+                        int dot = title.lastIndexOf('.');
+                        if (dot != -1) title = title.substring(0, dot);
+
+                        String uploadPayload =
+                                "photoTitle:" + title +
+                                        "|fileName:"  + currentDownloadFile +
+                                        "|caption:"   + "" +
+                                        "|data:"      + b64;
+
+                        connection.sendMessage(new Message(
+                                MessageType.UPLOAD,
+                                connection.getClientId(),
+                                uploadPayload
+                        ));
+                        System.out.println("FileTransferHandler: auto-resynced " + currentDownloadFile + " to server.");
+                    } catch (IOException e) {
+                        System.out.println("FileTransferHandler: failed to resync "
+                                + currentDownloadFile + ": " + e.getMessage());
+                    }
+
+                    // Reset state
                     downloadBuffer.setLength(0);
                     currentDownloadFile = null;
                     break;
+                }
                 case NACK:
                     System.out.println("Download error: " + msg.getPayload());
                     break;
                 default:
+                    // ignore other types
                     break;
             }
         } catch (InterruptedException e) {
-            System.out.println("FileTransferHandler: Interrupted while processing file chunk: " + e.getMessage());
+            System.out.println("FileTransferHandler: Interrupted: " + e.getMessage());
         }
     }
 
-    // Saves the downloaded file to the local ClientFiles directory, decoding Base64.
+    // Saves the downloaded file into ClientFiles, decoding Base64.
     private static void saveDownloadedFile() {
         if (currentDownloadFile == null || downloadBuffer.length() == 0) {
             System.out.println("FileTransferHandler: No file data to save.");
             return;
         }
         try {
-            // Remove any stray whitespace before decoding
-            String base64Data = downloadBuffer.toString().replaceAll("\\s+", "");
-            byte[] fileBytes = Base64.getDecoder().decode(base64Data);
+            // Decode and write the bytes
+            byte[] fileBytes = Base64.getDecoder().decode(
+                    downloadBuffer.toString().replaceAll("\\s+", "")
+            );
 
             File dir = new File("ClientFiles");
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
+            if (!dir.exists()) dir.mkdirs();
+
             File outputFile = new File(dir, currentDownloadFile);
             try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                 fos.write(fileBytes);
@@ -125,8 +164,6 @@ public class FileTransferHandler {
             System.out.println("FileTransferHandler: File '" + currentDownloadFile + "' saved successfully.");
         } catch (IOException e) {
             System.out.println("FileTransferHandler: Error saving downloaded file: " + e.getMessage());
-        } catch (IllegalArgumentException e) {
-            System.out.println("FileTransferHandler: Failed to decode Base64 data: " + e.getMessage());
         }
     }
 }
