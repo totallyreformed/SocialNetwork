@@ -43,16 +43,30 @@ public class ProfileManager {
         if (locks.containsKey(clientId)) {
             waitingQueues.putIfAbsent(clientId, new LinkedList<>());
             waitingQueues.get(clientId).offer(requesterId);
-            System.out.println(Util.getTimestamp() + " ProfileManager: Client " + requesterId
+
+            // Send immediate denial diagnostic to the requester
+            ClientHandler handler = ClientHandler.activeClients.get(requesterId);
+            if (handler != null) {
+                try {
+                    handler.getOutputStream().writeObject(
+                            new Message(MessageType.DIAGNOSTIC, "Server",
+                                    "Profile locked by another client. Please retry later."));
+                    handler.getOutputStream().flush();
+                } catch (IOException ignored) { }
+            }
+
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Client " + requesterId
                     + " queued for profile " + clientId);
             return false;
         } else {
             locks.put(clientId, true);
-            lockOwners.put(clientId, requesterId);                                    // NEW
+            lockOwners.put(clientId, requesterId);  // NEW
 
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
-                @Override public void run() {
+                @Override
+                public void run() {
                     // 1) Warn the owner that their lock is expiring
                     String owner = lockOwners.get(clientId);
                     ClientHandler ownerHandler = ClientHandler.activeClients.get(owner);
@@ -74,7 +88,8 @@ public class ProfileManager {
             }, Constants.TIMEOUT_MILLISECONDS);
             timers.put(clientId, timer);
 
-            System.out.println(Util.getTimestamp() + " ProfileManager: Profile " + clientId + " locked.");
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Profile " + clientId + " locked.");
             return true;
         }
     }
