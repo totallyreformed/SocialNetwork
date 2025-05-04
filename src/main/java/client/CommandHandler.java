@@ -4,10 +4,12 @@ package client;
 import java.util.Scanner;
 import common.Message;
 import common.Message.MessageType;
+import common.Constants;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.io.IOException;
 import java.util.Base64;
 
@@ -144,17 +146,27 @@ public class CommandHandler {
             String photoTitle = matcher.group(1).trim();
             String fileName   = matcher.group(2).trim();
             String caption    = matcher.group(3).trim();
+
+            // Build per-user path
+            String localDir = Constants.GROUP_ID + "client" + clientId;
+            Path clientFilePath = Paths.get("ClientFiles", localDir, fileName);
+
+            if (!Files.exists(clientFilePath)) {
+                System.out.println("Upload Error: Unable to read file '" + fileName
+                        + "'. Ensure it exists in ClientFiles/" + localDir);
+                return;
+            }
+
             try {
-                byte[] fileData      = Files.readAllBytes(Paths.get("ClientFiles", fileName));
+                byte[] fileData       = Files.readAllBytes(clientFilePath);
                 String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
-                String newPayload    = "photoTitle:" + photoTitle +
+                String newPayload     = "photoTitle:" + photoTitle +
                         "|fileName:"  + fileName +
                         "|caption:"   + caption +
                         "|data:"      + fileDataBase64;
                 connection.sendMessage(new Message(MessageType.UPLOAD, clientId, newPayload));
             } catch (IOException e) {
-                System.out.println("Upload Error: Unable to read file '" + fileName
-                        + "'. Ensure it exists in the ClientFiles directory.");
+                System.out.println("Upload Error: I/O problem reading '" + fileName + "': " + e.getMessage());
             }
         } else {
             System.out.println("Upload command format invalid.");
