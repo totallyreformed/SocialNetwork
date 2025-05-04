@@ -301,18 +301,7 @@ public class FileManager {
             System.out.println(Util.getTimestamp()
                     + " FileManager: DOWNLOAD completed successfully for " + photoName);
 
-            // 9) Server-side synchronisation
-            File syncDir = new File("ServerFiles/" + Constants.GROUP_ID
-                    + "client" + downloaderId);
-            if (!syncDir.exists()) syncDir.mkdirs();
-            Files.copy(photoFile.toPath(),
-                    new File(syncDir, photoName).toPath(),
-                    StandardCopyOption.REPLACE_EXISTING);
-            if (captionFile.exists()) {
-                Files.copy(captionFile.toPath(),
-                        new File(syncDir, photoName + ".txt").toPath(),
-                        StandardCopyOption.REPLACE_EXISTING);
-            }
+            // 9) Record the downloader as an owner for search purposes
             photoOwners
                     .computeIfAbsent(photoName, k -> ConcurrentHashMap.newKeySet())
                     .add(downloaderId);
