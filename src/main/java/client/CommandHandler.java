@@ -57,6 +57,10 @@ public class CommandHandler {
         System.out.println("   Example:         repost alice:3\n");
         System.out.println("11. comment:        Format -> comment <target_username>:<postId>:<comment text>");
         System.out.println("   Example:         comment alice:3:Nice shot!\n");
+        System.out.println("12. list_followers: Format -> list_followers");
+        System.out.println("   Lists users who follow you\n");
+        System.out.println("13. list_following: Format -> list_following");
+        System.out.println("   Lists users you are following\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
     }
@@ -105,6 +109,22 @@ public class CommandHandler {
 
             case "unfollow":
                 connection.sendMessage(new Message(MessageType.UNFOLLOW, connection.getClientId(), payload));
+                break;
+
+            case "list_followers":
+                connection.sendMessage(new Message(
+                        MessageType.LIST_FOLLOWERS,
+                        connection.getClientId(),
+                        ""
+                ));
+                break;
+
+            case "list_following":
+                connection.sendMessage(new Message(
+                        MessageType.LIST_FOLLOWING,
+                        connection.getClientId(),
+                        ""
+                ));
                 break;
 
             case "access_profile":

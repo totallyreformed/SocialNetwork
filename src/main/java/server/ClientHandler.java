@@ -159,6 +159,14 @@ public class ClientHandler implements Runnable {
                 SocialGraphManager.getInstance().handleUnfollow(msg);
                 break;
 
+            case LIST_FOLLOWERS:
+                SocialGraphManager.getInstance().handleListFollowers(msg, output);
+                break;
+
+            case LIST_FOLLOWING:
+                SocialGraphManager.getInstance().handleListFollowing(msg, output);
+                break;
+
             case SEARCH:
                 FileManager.handleSearch(msg, clientId, output);
                 break;

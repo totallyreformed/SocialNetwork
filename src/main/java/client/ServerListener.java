@@ -36,6 +36,26 @@ public class ServerListener implements Runnable {
                     continue;
                 }
 
+                if (msg.getType() == MessageType.LIST_FOLLOWERS_RESPONSE) {
+                    String payload = msg.getPayload();
+                    if (payload.isEmpty()) {
+                        System.out.println("You have no followers.");
+                    } else {
+                        System.out.println("Followers: " + payload);
+                    }
+                    continue;
+                }
+
+                if (msg.getType() == MessageType.LIST_FOLLOWING_RESPONSE) {
+                    String payload = msg.getPayload();
+                    if (payload.isEmpty()) {
+                        System.out.println("You are not following anyone.");
+                    } else {
+                        System.out.println("Following: " + payload);
+                    }
+                    continue;
+                }
+
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
 

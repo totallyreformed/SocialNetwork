@@ -225,6 +225,58 @@ public class SocialGraphManager {
         );
     }
 
+    /**
+     * NEW: Handle client's request to list their followers.
+     */
+    public void handleListFollowers(Message msg, ObjectOutputStream output) {
+        String requesterId = msg.getSenderId();
+        Set<String> followers = socialGraph.getOrDefault(requesterId, Collections.emptySet());
+        StringBuilder sb = new StringBuilder();
+        for (String id : followers) {
+            String name = AuthenticationManager.getUsernameByNumericId(id);
+            sb.append(name != null ? name : id).append(", ");
+        }
+        String list = sb.length() > 0 ? sb.substring(0, sb.length() - 2) : "";
+        try {
+            output.writeObject(new Message(
+                    MessageType.LIST_FOLLOWERS_RESPONSE,
+                    "Server",
+                    list
+            ));
+            output.flush();
+        } catch (IOException e) {
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Error sending LIST_FOLLOWERS_RESPONSE: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * NEW: Handle client's request to list who they follow.
+     */
+    public void handleListFollowing(Message msg, ObjectOutputStream output) {
+        String requesterId = msg.getSenderId();
+        Set<String> followees = getFollowees(requesterId);
+        StringBuilder sb = new StringBuilder();
+        for (String id : followees) {
+            String name = AuthenticationManager.getUsernameByNumericId(id);
+            sb.append(name != null ? name : id).append(", ");
+        }
+        String list = sb.length() > 0 ? sb.substring(0, sb.length() - 2) : "";
+        try {
+            output.writeObject(new Message(
+                    MessageType.LIST_FOLLOWING_RESPONSE,
+                    "Server",
+                    list
+            ));
+            output.flush();
+        } catch (IOException e) {
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Error sending LIST_FOLLOWING_RESPONSE: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     // Improved search: checks for file existence in the ServerFiles directory.
     public String searchPhoto(String photoName, String requesterNumericId) {
         File file = new File("ServerFiles/" + photoName);
