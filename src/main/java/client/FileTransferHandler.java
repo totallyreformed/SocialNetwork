@@ -127,6 +127,9 @@ public class FileTransferHandler {
             }
             System.out.println("FileTransferHandler: File '" + currentDownloadFile
                     + "' saved successfully to " + dir.getPath());
+
+            // Mark this event so FileSyncManager skips re‑uploading it
+            ClientSyncRegistry.markEvent(out.toPath());
         } catch (IOException e) {
             System.out.println("FileTransferHandler: Error saving downloaded file: " + e.getMessage());
         } catch (IllegalArgumentException e) {

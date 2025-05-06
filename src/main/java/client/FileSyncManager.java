@@ -3,12 +3,15 @@ package client;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static java.nio.file.StandardWatchEventKinds.*;
 
+/**
+ * Watches ClientFiles/<dir> for CREATE/MODIFY events and mirrors them
+ * into ServerFiles/<dir>, unless ClientSyncRegistry.shouldSkip(source) is true.
+ */
 public class FileSyncManager {
     private final WatchService watchService;
     private final Map<WatchKey, Path> keyToDir = new ConcurrentHashMap<>();
@@ -18,16 +21,11 @@ public class FileSyncManager {
         startWatcherThread();
     }
 
-    /**
-     * Begin watching the given directory. Any CREATE or MODIFY event in that
-     * directory will be mirrored into ServerFiles/<dirName>.
-     */
+    /** Start watching the given local directory for file changes. */
     public void registerDirectory(String directoryPath) {
         Path dir = Paths.get(directoryPath);
         try {
-            if (!Files.exists(dir)) {
-                Files.createDirectories(dir);
-            }
+            if (Files.notExists(dir)) Files.createDirectories(dir);
             WatchKey key = dir.register(watchService, ENTRY_CREATE, ENTRY_MODIFY);
             keyToDir.put(key, dir);
             System.out.println("FileSyncManager: now watching " + dir.toAbsolutePath());
@@ -41,48 +39,46 @@ public class FileSyncManager {
             System.out.println("FileSyncManager: watcher thread started");
             while (true) {
                 WatchKey key;
-                try {
-                    key = watchService.take();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-
+                try { key = watchService.take(); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 Path dir = keyToDir.get(key);
-                if (dir == null) {
-                    key.reset();
-                    continue;
-                }
+                if (dir == null) { key.reset(); continue; }
 
                 for (WatchEvent<?> ev : key.pollEvents()) {
                     if (ev.kind() == OVERFLOW) continue;
-                    @SuppressWarnings("unchecked")
                     Path filename = ((WatchEvent<Path>) ev).context();
-                    Path source = dir.resolve(filename);
+                    Path source   = dir.resolve(filename);
 
-                    // copy into ServerFiles/<dirName>
+                    boolean isCreate = ev.kind() == ENTRY_CREATE;
+                    boolean isTxtModify = ev.kind() == ENTRY_MODIFY
+                            && filename.toString().endsWith(".txt");
+
+                    if (!isCreate || isTxtModify) { continue; }
+
+                    /* skip if just landed from server: identical size & nearly same mtime */
                     Path serverDir = Paths.get("ServerFiles", dir.getFileName().toString());
-                    try {
-                        if (!Files.exists(serverDir)) {
-                            Files.createDirectories(serverDir);
-                        }
-                        Path dest = serverDir.resolve(filename);
-                        Files.copy(source, dest, StandardCopyOption.REPLACE_EXISTING);
-                        System.out.println("FileSyncManager: copied " +
-                                source.getFileName() + " → " + serverDir);
-                    } catch (IOException ioe) {
-                        System.err.println("FileSyncManager: copy failed for " +
-                                source + ": " + ioe.getMessage());
-                    }
-                }
+                    Path dest      = serverDir.resolve(filename);
 
-                if (!key.reset()) {
-                    keyToDir.remove(key);
-                    if (keyToDir.isEmpty()) {
-                        System.out.println("FileSyncManager: no directories left, exiting watcher");
-                        break;
+                    try {
+                        if (Files.exists(dest)) {
+                            long sizeLocal  = Files.size(source);
+                            long sizeRemote = Files.size(dest);
+                            long dt = Math.abs(Files.getLastModifiedTime(source).toMillis()
+                                    - Files.getLastModifiedTime(dest).toMillis());
+                            if (sizeLocal == sizeRemote && dt < 2_000) {
+                                continue;   // downloaded moments ago → do not re-upload
+                            }
+                        }
+                        Files.createDirectories(serverDir);
+                        Files.copy(source, dest, StandardCopyOption.REPLACE_EXISTING);
+                        System.out.println("FileSyncManager: copied "
+                                + filename + " → " + serverDir);
+                    } catch (IOException io) {
+                        System.err.println("FileSyncManager: copy failed for "
+                                + source + " : " + io.getMessage());
                     }
                 }
+                key.reset();
             }
         }, "FileSyncManager-Watcher");
 

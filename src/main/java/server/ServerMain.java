@@ -15,7 +15,7 @@ public class ServerMain {
         threadPool = Executors.newFixedThreadPool(Constants.MAX_CLIENT_THREADS);
     }
 
-    public void startServer() {
+    public void startServer() throws IOException {
         // Start the directory watcher in its own thread.
         Thread watcherThread = new Thread(new DirectoryWatcher("ServerFiles"));
         watcherThread.start();
@@ -40,7 +40,7 @@ public class ServerMain {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         ServerMain server = new ServerMain();
         server.startServer();
     }
