@@ -9,6 +9,8 @@ import common.Util;
 import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 import java.util.LinkedHashSet;
@@ -23,11 +25,15 @@ public class FileManager {
     private static ConcurrentHashMap<String, String> titleToFileName = new ConcurrentHashMap<>();
 
     /**
-     * Handle file upload: saves into per-client subdir, updates profile,
-     * notifies followers, and records the owner for both filename and title search.
+     * Handle file upload: if base64 data is provided, decode it; otherwise
+     * read the file from the client's local directory under ClientFiles/<group>client<id>.
+     * Saves into per-client subdir, updates profile, notifies followers, and records
+     * the owner for both filename and title search.
      */
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
+
+        // Parse payload parts
         String payload = msg.getPayload();
         String[] parts = payload.split("\\|");
         String photoTitle = "", fileName = "", caption = "", base64Data = "";
@@ -43,15 +49,25 @@ public class FileManager {
         }
 
         try {
-            // Per-client upload directory
+            // Ensure server sub‑directory exists
             File dir = new File("ServerFiles/" + Constants.GROUP_ID + "client" + clientId);
             if (!dir.exists()) {
                 dir.mkdirs();
                 System.out.println(Util.getTimestamp() + " FileManager: Created directory " + dir.getPath());
             }
 
-            // Decode and save the photo binary
-            byte[] fileBytes = Base64.getDecoder().decode(base64Data);
+            // Determine file bytes: either from base64 or from the client's local folder
+            byte[] fileBytes;
+            if (!base64Data.isEmpty()) {
+                fileBytes = Base64.getDecoder().decode(base64Data);
+            } else {
+                Path clientPath = Paths.get("ClientFiles",
+                        Constants.GROUP_ID + "client" + clientId,
+                        fileName);
+                fileBytes = Files.readAllBytes(clientPath);
+            }
+
+            // Save the photo file on server
             File photoFile = new File(dir, fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(fileBytes);
@@ -68,17 +84,27 @@ public class FileManager {
             titleOwners
                     .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet())
                     .add(clientId);
-            // Map title → fileName (latest upload wins, or first one)
             titleToFileName.putIfAbsent(key, fileName);
 
-            // Save the caption
+            // Determine caption text: from payload or from client's local caption file
+            String captionText = caption;
+            if (captionText.isEmpty()) {
+                Path clientCaption = Paths.get("ClientFiles",
+                        Constants.GROUP_ID + "client" + clientId,
+                        fileName + ".txt");
+                if (Files.exists(clientCaption)) {
+                    captionText = new String(Files.readAllBytes(clientCaption));
+                }
+            }
+
+            // Save the caption on server
             File captionFile = new File(dir, fileName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
-                fos.write(caption.getBytes());
+                fos.write(captionText.getBytes());
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
 
-            // Update profile and notify followers
+            // Update profile, notify followers
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
             String uploaderUsername = AuthenticationManager.getUsernameByNumericId(clientId);
             String notification = "User " + uploaderUsername + " uploaded " + photoTitle;
