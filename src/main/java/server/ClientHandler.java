@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import common.Message;
 import common.Message.MessageType;
-import common.Constants;
 
 public class ClientHandler implements Runnable {
     private Socket clientSocket;
@@ -68,7 +67,7 @@ public class ClientHandler implements Runnable {
         }
 
         switch (msg.getType()) {
-            case SIGNUP: {
+            case SIGNUP:
                 // Payload format: "username:password"
                 String[] signupParts = msg.getPayload().split(":");
                 if (signupParts.length == 2) {
@@ -91,10 +90,6 @@ public class ClientHandler implements Runnable {
                                 clientId,
                                 "Welcome " + username + " (ClientID: " + clientId + ")"
                         ));
-
-                        // Initial sync of existing server files for this user
-                        String clientDirName = Constants.GROUP_ID + "client" + clientId;
-                        ServerMain.getDirectoryWatcher().initialScanFor(clientDirName);
                     } else {
                         sendMessage(new Message(MessageType.AUTH_FAILURE, "Server",
                                 "Signup failed: Username already exists."));
@@ -104,9 +99,8 @@ public class ClientHandler implements Runnable {
                             "Signup failed: Invalid format. Use username:password."));
                 }
                 break;
-            }
 
-            case LOGIN: {
+            case LOGIN:
                 // Payload format: "username:password"
                 String[] loginParts = msg.getPayload().split(":");
                 if (loginParts.length == 2) {
@@ -130,10 +124,6 @@ public class ClientHandler implements Runnable {
                                 "Welcome back " + username + " (ClientID: " + clientId + ")"
                         ));
 
-                        // Initial sync of existing server files for this user
-                        String clientDirName = Constants.GROUP_ID + "client" + clientId;
-                        ServerMain.getDirectoryWatcher().initialScanFor(clientDirName);
-
                         // Replay any pending notifications
                         for (String notification : NotificationManager.getInstance().getNotifications(clientId)) {
                             sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -148,7 +138,6 @@ public class ClientHandler implements Runnable {
                             "Login failed: Invalid format. Use username:password."));
                 }
                 break;
-            }
 
             case UPLOAD:
                 FileManager.handleUpload(msg, clientId, output);
@@ -174,7 +163,7 @@ public class ClientHandler implements Runnable {
                 FileManager.handleSearch(msg, clientId, output);
                 break;
 
-            case REPOST: {
+            case REPOST:
                 // Expected payload: "target_username:postId"
                 String[] repostTokens = msg.getPayload().split(":", 2);
                 if (repostTokens.length == 2) {
@@ -182,6 +171,7 @@ public class ClientHandler implements Runnable {
                     String postId         = repostTokens[1];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
                     if (targetNumericId != null) {
+                        // Queue the repost notification
                         ProfileManager.handleRepost(msg, clientId, output);
                     } else {
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -192,9 +182,8 @@ public class ClientHandler implements Runnable {
                             "Repost failed: Invalid format. Use target_username:postId"));
                 }
                 break;
-            }
 
-            case COMMENT: {
+            case COMMENT:
                 // Expected payload: "target_username:postId:commentText"
                 String[] commentParts = msg.getPayload().split(":", 3);
                 if (commentParts.length == 3) {
@@ -203,9 +192,8 @@ public class ClientHandler implements Runnable {
                     String commentText    = commentParts[2];
                     String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
                     if (targetNumericId != null) {
-                        ProfileManager.getInstance().addCommentToPost(
-                                targetNumericId, postId, clientId, commentText
-                        );
+                        // Queue the comment (ProfileManager will add notification)
+                        ProfileManager.getInstance().addCommentToPost(targetNumericId, postId, clientId, commentText);
                         sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
                                 "Comment added to post " + postId + " of user " + targetUsername));
                     } else {
@@ -217,7 +205,6 @@ public class ClientHandler implements Runnable {
                             "Comment failed: Invalid format. Use target_username:postId:comment text"));
                 }
                 break;
-            }
 
             case FOLLOW_RESPONSE:
                 SocialGraphManager.getInstance().handleFollowResponse(msg);

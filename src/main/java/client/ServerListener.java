@@ -5,16 +5,10 @@ import java.io.ObjectInputStream;
 import java.io.IOException;
 import java.io.File;
 import java.io.FileWriter;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
-
-import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 public class ServerListener implements Runnable {
     private ObjectInputStream input;
@@ -46,34 +40,6 @@ public class ServerListener implements Runnable {
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
 
-                    if (p.startsWith("AUTO_DOWNLOAD:")) {
-                        String fileName = p.substring("AUTO_DOWNLOAD:".length());
-                        System.out.println("AUTO_SYNC: copying " + fileName + " from server files");
-
-                        String clientId = connection.getClientId();
-                        Path serverFile = Paths.get("ServerFiles",
-                                Constants.GROUP_ID + "client" + clientId,
-                                fileName);
-                        Path clientDir  = Paths.get("ClientFiles",
-                                Constants.GROUP_ID + "client" + clientId);
-                        Path clientFile = clientDir.resolve(fileName);
-
-                        try {
-                            if (!Files.exists(clientDir)) {
-                                Files.createDirectories(clientDir);
-                            }
-
-                            // Prevent this copy from bouncing back to the server
-                            FileSyncManager.skipSyncFor(fileName, 2000);
-
-                            Files.copy(serverFile, clientFile, REPLACE_EXISTING);
-                            System.out.println("AUTO_SYNC: copied " +
-                                    serverFile + " → " + clientFile);
-                        } catch (IOException e) {
-                            System.err.println("AUTO_SYNC: error copying file: " + e.getMessage());
-                        }
-                        continue;
-                    }
                     if (p.startsWith("Search: found photo ")) {
                         System.out.println(p);
                         String[] parts = p.split(" at: ");
@@ -82,6 +48,7 @@ public class ServerListener implements Runnable {
                             String[] owners = parts[1].split(",");
                             int ri = new java.util.Random().nextInt(owners.length);
                             String chosenToken = owners[ri];        // "3(alice)"
+                            // extract ownerName inside parentheses
                             String ownerName = chosenToken
                                     .substring(chosenToken.indexOf('(')+1, chosenToken.indexOf(')'));
                             System.out.println("Initiating download of " + file
