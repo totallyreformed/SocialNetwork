@@ -73,6 +73,8 @@ public class FileManager {
                 fos.write(fileBytes);
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName);
+            // Mark this file so DirectoryWatcher will skip re-syncing it
+            SyncRegistry.markEvent(photoFile.toPath());
 
             // Record ownership for filename-based search
             photoOwners
@@ -103,6 +105,8 @@ public class FileManager {
                 fos.write(captionText.getBytes());
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
+            // Mark this file so DirectoryWatcher will skip re-syncing it
+            SyncRegistry.markEvent(captionFile.toPath());
 
             // Update profile, notify followers
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
