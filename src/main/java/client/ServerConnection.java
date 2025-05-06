@@ -38,14 +38,6 @@ public class ServerConnection {
         }
     }
 
-    public ObjectOutputStream getOutputStream() {
-        return output;
-    }
-
-    public ObjectInputStream getInputStream() {
-        return input;
-    }
-
     // Updated: Set client ID without printing verbose logs.
     public String getClientId() {
         return clientId;

@@ -150,6 +150,8 @@ public class ProfileManager {
             fw.write(entry);
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Updated " + fileName + " with: " + entry.trim());
+            // mark event so DirectoryWatcher skips this change
+            SyncRegistry.markEvent(new File(fileName).toPath());
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error writing to " + fileName);
@@ -189,6 +191,8 @@ public class ProfileManager {
             fw.write(logEntry);
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Appended comment to " + fileName);
+            // NEW: mark event so DirectoryWatcher skips this change
+            SyncRegistry.markEvent(new File(fileName).toPath());
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error appending comment to " + fileName);
@@ -211,15 +215,6 @@ public class ProfileManager {
         }
 
         unlockProfile(targetId);
-    }
-
-    /**
-     * Simulate retrieval of profile content if needed.
-     */
-    public synchronized String getProfile(String clientId) {
-        System.out.println(Util.getTimestamp() + " ProfileManager: Retrieving profile for client "
-                + clientId);
-        return "Profile content for client " + clientId;
     }
 
     /**
@@ -393,6 +388,8 @@ public class ProfileManager {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Client " + requesterNumericId
                     + " updated Others file with repost.");
+            // NEW: mark event so DirectoryWatcher skips this change
+            SyncRegistry.markEvent(new File(othersFileName).toPath());
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error in repost for client " + requesterNumericId);
@@ -420,5 +417,4 @@ public class ProfileManager {
         String notif = "Your post " + postId + " was reposted by " + reposterName;
         NotificationManager.getInstance().addNotification(targetNumericId, notif);
     }
-
 }

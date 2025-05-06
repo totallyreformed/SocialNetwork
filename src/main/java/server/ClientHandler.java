@@ -236,11 +236,6 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Expose registry lookup
-    public static String getClientAddress(String clientId) {
-        return clientAddressMap.get(clientId);
-    }
-
     // For asynchronously sending messages
     public ObjectOutputStream getOutputStream() {
         return output;

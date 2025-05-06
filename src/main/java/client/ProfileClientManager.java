@@ -3,11 +3,6 @@ package client;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.file.Files;
 import common.Constants;
 
 public class ProfileClientManager {
@@ -49,19 +44,6 @@ public class ProfileClientManager {
         } catch (IOException e) {
             System.out.println("ProfileClientManager: Error updating local Others file.");
             e.printStackTrace();
-        }
-    }
-
-    // Read and return the content of the local profile.
-    public String readProfile() {
-        try {
-            String content = new String(Files.readAllBytes(new File(profileFileName).toPath()));
-            System.out.println("ProfileClientManager: Read local profile for " + clientId);
-            return content;
-        } catch (IOException e) {
-            System.out.println("ProfileClientManager: Error reading local profile.");
-            e.printStackTrace();
-            return "";
         }
     }
 }

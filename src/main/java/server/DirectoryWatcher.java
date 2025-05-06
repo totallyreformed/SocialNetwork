@@ -47,6 +47,8 @@ public class DirectoryWatcher implements Runnable {
                 Path full = watchedDir.resolve(name);
                 WatchEvent.Kind<?> kind = e.kind();
 
+                if (SyncRegistry.shouldSkip(full)) { continue; }
+
                 /* register new client sub-dir */
                 if (watchedDir.equals(serverRoot)
                         && kind == StandardWatchEventKinds.ENTRY_CREATE

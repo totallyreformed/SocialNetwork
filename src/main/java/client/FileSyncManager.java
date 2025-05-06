@@ -54,6 +54,7 @@ public class FileSyncManager {
                             && filename.toString().endsWith(".txt");
 
                     if (!isCreate || isTxtModify) { continue; }
+                    if (ClientSyncRegistry.shouldSkip(source)) { continue; }
 
                     /* skip if just landed from server: identical size & nearly same mtime */
                     Path serverDir = Paths.get("ServerFiles", dir.getFileName().toString());

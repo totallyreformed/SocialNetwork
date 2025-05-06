@@ -277,60 +277,6 @@ public class SocialGraphManager {
         }
     }
 
-    // Improved search: checks for file existence in the ServerFiles directory.
-    public String searchPhoto(String photoName, String requesterNumericId) {
-        File file = new File("ServerFiles/" + photoName);
-        if (file.exists()) {
-            String result = "Found photo " + photoName + " at clientID dummyOwner";
-            System.out.println("SocialGraphManager: SEARCH found file " + photoName);
-            return result;
-        } else {
-            String result = "Photo " + photoName + " not found.";
-            System.out.println("SocialGraphManager: SEARCH did not find file " + photoName);
-            return result;
-        }
-    }
-
-    // Handles access_profile where the payload contains the target's username.
-    public static void handleAccessProfile(Message msg, String requesterNumericId, ObjectOutputStream output) {
-        String targetUsername = msg.getPayload();
-        String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
-        if (targetNumericId == null) {
-            try {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access_profile failed: User '" + targetUsername + "' not found."));
-                output.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            return;
-        }
-        boolean allowed = getInstance().isFollowing(requesterNumericId, targetNumericId);
-        try {
-            if (allowed) {
-                String profileContent = ProfileManager.getInstance().getProfile(targetNumericId);
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access granted. " + profileContent));
-                System.out.println("SocialGraphManager: Access_profile granted for requester " + requesterNumericId + " to target " + targetNumericId);
-            } else {
-                output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access denied: You do not follow user '" + targetUsername + "'."));
-                System.out.println("SocialGraphManager: Access_profile denied for requester " + requesterNumericId + " to target " + targetNumericId);
-            }
-            output.flush();
-        } catch (IOException e) {
-            System.out.println("SocialGraphManager: Error handling access_profile: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    // Helper method: Given a numeric id, retrieve its corresponding username.
-    private String getUsernameByNumericId(String numericId) {
-        for (ClientRecord record : AuthenticationManager.getAllClientRecords()) {
-            if (record.numericId.equals(numericId)) {
-                return record.username;
-            }
-        }
-        return null;
-    }
-
     // Helper method: Given a numeric id, retrieve its corresponding client record.
     public Set<String> getFollowers(String uploaderNumericId) {
         return socialGraph.getOrDefault(uploaderNumericId, new HashSet<>());
