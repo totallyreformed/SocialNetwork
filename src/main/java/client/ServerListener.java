@@ -5,7 +5,6 @@ import java.io.ObjectInputStream;
 import java.io.IOException;
 import java.io.File;
 import java.io.FileWriter;
-
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
@@ -98,7 +97,12 @@ public class ServerListener implements Runnable {
                 }
 
                 if (msg.getType() == MessageType.FOLLOW_REQUEST) {
-                    System.out.println("Follow request received: " + msg.getPayload());
+                    // Interactive prompt for live follow requests
+                    String[] parts = msg.getPayload().split(":", 2);
+                    String requesterUsername = parts[0];
+                    System.out.println("\n>>> User '" + requesterUsername + "' wants to follow you.");
+                    System.out.println("    Type: respondfollow " + requesterUsername + ":<accept|reject|reciprocate>");
+                    System.out.print("> ");
                     continue;
                 }
 
@@ -106,7 +110,6 @@ public class ServerListener implements Runnable {
                         || msg.getType() == MessageType.FILE_CHUNK
                         || msg.getType() == MessageType.FILE_END
                         || msg.getType() == MessageType.NACK) {
-
                     if (msg.getType() == MessageType.HANDSHAKE) {
                         String hs = msg.getPayload();
                         int idx = hs.indexOf("for ");
@@ -114,7 +117,6 @@ public class ServerListener implements Runnable {
                             lastDownloadFileName = hs.substring(idx + 4).trim();
                         }
                     }
-
                     FileTransferHandler.handleIncomingMessage(msg, connection);
                 }
             }

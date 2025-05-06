@@ -70,21 +70,23 @@ public class SocialGraphManager {
      */
     public void handleFollow(Message msg) {
         String requesterNumericId = msg.getSenderId();
-        String requesterUsername = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
-        String targetUsername = msg.getPayload();
-        String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
+        String requesterUsername  = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
+        String targetUsername     = msg.getPayload();
+        String targetNumericId    = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
-            System.out.println(Util.getTimestamp() + " SocialGraphManager: Follow request error – target username '" + targetUsername + "' not found.");
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Follow request error – target username '"
+                    + targetUsername + "' not found.");
             return;
         }
 
-        // Queue a notification for the target so they see it when they log in
+        // 1) Queue offline notification
         NotificationManager.getInstance().addNotification(
                 targetNumericId,
                 "User " + requesterUsername + " requested to follow you"
         );
 
-        // Confirm to requester
+        // 2) Confirm to the requester
         ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
         if (requesterHandler != null) {
             requesterHandler.sendExternalMessage(new Message(
@@ -94,23 +96,20 @@ public class SocialGraphManager {
             ));
         }
 
-        // If the target is online, send the real-time follow request prompt
+        // 3) If the target is online *and* is a different handler than the requester, push live
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
-        if (targetHandler != null) {
+        if (targetHandler != null && targetHandler != requesterHandler) {
             Message followRequest = new Message(
                     MessageType.FOLLOW_REQUEST,
                     "Server",
                     requesterUsername + ":" + requesterNumericId
             );
-            try {
-                targetHandler.getOutputStream().writeObject(followRequest);
-                targetHandler.getOutputStream().flush();
-                System.out.println(Util.getTimestamp() + " SocialGraphManager: Sent FOLLOW_REQUEST to " + targetUsername);
-            } catch (IOException e) {
-                System.out.println(Util.getTimestamp() + " SocialGraphManager: Error sending FOLLOW_REQUEST to target: " + e.getMessage());
-            }
-        } else {
-            System.out.println(Util.getTimestamp() + " SocialGraphManager: Target (" + targetUsername + ") not online. Notification queued.");
+            targetHandler.sendExternalMessage(followRequest);
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Sent FOLLOW_REQUEST to " + targetUsername);
+        } else if (targetHandler == null) {
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Target (" + targetUsername + ") not online. Notification queued.");
         }
     }
 
