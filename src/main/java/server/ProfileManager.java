@@ -128,29 +128,39 @@ public class ProfileManager {
                     + " ProfileManager: Unable to acquire lock on profile " + clientId);
             return;
         }
+
         String username = AuthenticationManager.getUsernameByNumericId(clientId);
         AtomicInteger ctr = postIdCounters.computeIfAbsent(clientId, k -> new AtomicInteger(1));
         int postId = ctr.getAndIncrement();
 
-        String fileName = "Profile_" + Constants.GROUP_ID + "client" + clientId + ".txt";
-        String entry    = "PostID:" + postId
+        // Ensure server-side per-client directory exists
+        String dirPath = "ServerFiles/" + Constants.GROUP_ID + "client" + clientId;
+        File dir = new File(dirPath);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        // Write into that directory
+        String fileName = dirPath + "/Profile_" + Constants.GROUP_ID + "client" + clientId + ".txt";
+        String entry = "PostID:" + postId
                 + " [" + Util.getTimestamp() + "] "
                 + username + " posted " + content + "\n";
 
         try (FileWriter fw = new FileWriter(new File(fileName), true)) {
             fw.write(entry);
-            System.out.println(Util.getTimestamp() + " ProfileManager: Updated " + fileName
-                    + " with: " + entry.trim());
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Updated " + fileName + " with: " + entry.trim());
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error writing to " + fileName);
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Error writing to " + fileName);
             e.printStackTrace();
+        } finally {
+            unlockProfile(clientId);
         }
-        unlockProfile(clientId);
     }
 
     /**
-     * Add a comment to a specific post by postId, then queue notifications
-     * for the original author and all of their followers.
+     * Add a comment to a specific post by postId, then queue notifications.
      */
     public synchronized void addCommentToPost(String targetId,
                                               String postId,
@@ -161,18 +171,27 @@ public class ProfileManager {
                     + " ProfileManager: Unable to lock profile " + targetId + " for commenting.");
             return;
         }
+
         String commenterName = AuthenticationManager.getUsernameByNumericId(commenterId);
-        String fileName = "Profile_" + Constants.GROUP_ID + "client" + targetId + ".txt";
+
+        // Ensure server-side per-client directory exists
+        String dirPath = "ServerFiles/" + Constants.GROUP_ID + "client" + targetId;
+        File dir = new File(dirPath);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        String fileName = dirPath + "/Profile_" + Constants.GROUP_ID + "client" + targetId + ".txt";
         String logEntry = "[" + Util.getTimestamp() + "] Comment on post "
                 + postId + " from " + commenterName + ": " + comment + "\n";
 
         try (FileWriter fw = new FileWriter(new File(fileName), true)) {
             fw.write(logEntry);
-            System.out.println(Util.getTimestamp() + " ProfileManager: Appended comment to "
-                    + fileName + ": " + logEntry.trim());
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Appended comment to " + fileName);
         } catch (IOException e) {
-            System.out.println(Util.getTimestamp() + " ProfileManager: Error appending comment to "
-                    + fileName);
+            System.out.println(Util.getTimestamp()
+                    + " ProfileManager: Error appending comment to " + fileName);
             e.printStackTrace();
         }
 
@@ -206,7 +225,7 @@ public class ProfileManager {
     /**
      * Handle access_profile requests:
      * - Verify follow status
-     * - Read Profile_<GROUP_ID>client<targetId>.txt
+     * - Read ServerFiles/<GROUP_ID>client<targetId>/Profile_<GROUP_ID>client<targetId>.txt
      * - Two-pass parse: first collect all comments, then print posts with their comments
      */
     public static void handleAccessProfile(Message msg,
@@ -236,7 +255,14 @@ public class ProfileManager {
                 return;
             }
 
-            String fileName = "Profile_" + Constants.GROUP_ID
+            // Ensure server-side per-client directory exists
+            String dirPath = "ServerFiles/" + Constants.GROUP_ID + "client" + targetNumericId;
+            File dir = new File(dirPath);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+
+            String fileName = dirPath + "/Profile_" + Constants.GROUP_ID
                     + "client" + targetNumericId + ".txt";
             File profileFile = new File(fileName);
 
@@ -264,11 +290,9 @@ public class ProfileManager {
             }
 
             // Second pass: output posts with their comments
-            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                    "Access granted."));
+            output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", "Access granted."));
             for (String line : lines) {
                 if (line.startsWith("PostID:")) {
-                    // Extract postId
                     int spaceIdx = line.indexOf(' ');
                     int postId = Integer.parseInt(line.substring("PostID:".length(), spaceIdx));
                     output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -296,7 +320,8 @@ public class ProfileManager {
     }
 
     /**
-     * Handle repost requests: append to server's Others file, notify reposting client,
+     * Handle repost requests: append to server's Others file under
+     * ServerFiles/<GROUP_ID>client<requesterId>, notify reposting client,
      * instruct client to sync locally, and queue a notification for the original author.
      */
     public static void handleRepost(Message msg,
@@ -312,9 +337,9 @@ public class ProfileManager {
             } catch (IOException e) { e.printStackTrace(); }
             return;
         }
-        String targetUsername = parts[0];
-        String postId         = parts[1];
-        String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
+        String targetUsername   = parts[0];
+        String postId           = parts[1];
+        String targetNumericId  = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
             try {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -324,10 +349,12 @@ public class ProfileManager {
             return;
         }
 
-        // Read original post
-        String profileFileName = "Profile_" + Constants.GROUP_ID + "client" + targetNumericId + ".txt";
+        // Read original post from the server-side per-client directory
+        String profilePath = "ServerFiles/" + Constants.GROUP_ID
+                + "client" + targetNumericId
+                + "/Profile_" + Constants.GROUP_ID + "client" + targetNumericId + ".txt";
         String originalLine = "";
-        try (BufferedReader br = new BufferedReader(new FileReader(profileFileName))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(profilePath))) {
             String line;
             while ((line = br.readLine()) != null) {
                 if (line.startsWith("PostID:" + postId + " ")) {
@@ -337,7 +364,7 @@ public class ProfileManager {
             }
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
-                    + " ProfileManager: Error reading profile file " + profileFileName);
+                    + " ProfileManager: Error reading profile file " + profilePath);
             e.printStackTrace();
         }
         if (originalLine.isEmpty()) {
@@ -349,17 +376,23 @@ public class ProfileManager {
             return;
         }
 
+        // Ensure server-side per-client directory exists for requester
+        String dirPath = "ServerFiles/" + Constants.GROUP_ID + "client" + requesterNumericId;
+        File dir = new File(dirPath);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
         // Append to server-side Others file
-        String othersFileName = "Others_" + Constants.GROUP_ID + "client" + requesterNumericId + ".txt";
+        String othersFileName = dirPath + "/Others_" + Constants.GROUP_ID
+                + "client" + requesterNumericId + ".txt";
         String entry = "[" + Util.getTimestamp() + "] Repost of post "
-                + postId + " from " + targetUsername
-                + ": " + originalLine;
+                + postId + " from " + targetUsername + ": " + originalLine;
         try (FileWriter fw = new FileWriter(new File(othersFileName), true)) {
             fw.write(entry + "\n");
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Client " + requesterNumericId
-                    + " reposted post " + postId
-                    + " from user " + targetUsername);
+                    + " updated Others file with repost.");
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Error in repost for client " + requesterNumericId);
@@ -384,8 +417,8 @@ public class ProfileManager {
 
         // Queue notification for the original author
         String reposterName = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
-        String notif = "Your post " + postId
-                + " was reposted by " + reposterName;
+        String notif = "Your post " + postId + " was reposted by " + reposterName;
         NotificationManager.getInstance().addNotification(targetNumericId, notif);
     }
+
 }
