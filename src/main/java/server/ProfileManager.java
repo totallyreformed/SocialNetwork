@@ -191,7 +191,7 @@ public class ProfileManager {
             fw.write(logEntry);
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Appended comment to " + fileName);
-            // NEW: mark event so DirectoryWatcher skips this change
+            // mark event so DirectoryWatcher skips this change
             SyncRegistry.markEvent(new File(fileName).toPath());
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
@@ -199,23 +199,44 @@ public class ProfileManager {
             e.printStackTrace();
         }
 
-        // Prepare notification text
+        // Prepare notification
         String notif = "New comment on post " + postId
                 + " from " + commenterName + ": " + comment;
 
-        // Queue for original author
+        // Author: queue, live push & purge
         NotificationManager.getInstance().addNotification(targetId, notif);
+        ClientHandler authorH = ClientHandler.activeClients.get(targetId);
+        if (authorH != null) {
+            authorH.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    notif
+            ));
+            NotificationManager.getInstance()
+                    .removeNotification(targetId, notif);
+        }
 
-        // Queue for all followers (except the commenter)
+        // Followers: queue, live push & purge
         Set<String> followers = SocialGraphManager.getInstance().getFollowers(targetId);
-        for (String followerId : followers) {
-            if (!followerId.equals(commenterId)) {
-                NotificationManager.getInstance().addNotification(followerId, notif);
+        for (String fid : followers) {
+            if (!fid.equals(commenterId)) {
+                NotificationManager.getInstance().addNotification(fid, notif);
+                ClientHandler fh = ClientHandler.activeClients.get(fid);
+                if (fh != null) {
+                    fh.sendExternalMessage(new Message(
+                            MessageType.DIAGNOSTIC,
+                            "Server",
+                            notif
+                    ));
+                    NotificationManager.getInstance()
+                            .removeNotification(fid, notif);
+                }
             }
         }
 
         unlockProfile(targetId);
     }
+
 
     /**
      * Handle access_profile requests:
@@ -388,7 +409,7 @@ public class ProfileManager {
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Client " + requesterNumericId
                     + " updated Others file with repost.");
-            // NEW: mark event so DirectoryWatcher skips this change
+            // mark event so DirectoryWatcher skips this change
             SyncRegistry.markEvent(new File(othersFileName).toPath());
         } catch (IOException e) {
             System.out.println(Util.getTimestamp()
@@ -413,8 +434,20 @@ public class ProfileManager {
         }
 
         // Queue notification for the original author
-        String reposterName = AuthenticationManager.getUsernameByNumericId(requesterNumericId);
-        String notif = "Your post " + postId + " was reposted by " + reposterName;
+        String notif = "Your post " + postId + " was reposted by " +
+                AuthenticationManager.getUsernameByNumericId(requesterNumericId);
+
+        // Queue & live push to original author, then purge
         NotificationManager.getInstance().addNotification(targetNumericId, notif);
+        ClientHandler oh = ClientHandler.activeClients.get(targetNumericId);
+        if (oh != null) {
+            oh.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    notif
+            ));
+            NotificationManager.getInstance()
+                    .removeNotification(targetNumericId, notif);
+        }
     }
 }

@@ -80,11 +80,10 @@ public class SocialGraphManager {
             return;
         }
 
+        String notif = "User " + requesterUsername + " requested to follow you";
+
         // 1) Queue offline notification
-        NotificationManager.getInstance().addNotification(
-                targetNumericId,
-                "User " + requesterUsername + " requested to follow you"
-        );
+        NotificationManager.getInstance().addNotification(targetNumericId, notif);
 
         // 2) Confirm to the requester
         ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
@@ -99,12 +98,15 @@ public class SocialGraphManager {
         // 3) If the target is online *and* is a different handler than the requester, push live
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
         if (targetHandler != null && targetHandler != requesterHandler) {
+            // live prompt
             Message followRequest = new Message(
                     MessageType.FOLLOW_REQUEST,
                     "Server",
                     requesterUsername + ":" + requesterNumericId
             );
             targetHandler.sendExternalMessage(followRequest);
+            // purge the queued copy
+            NotificationManager.getInstance().removeNotification(targetNumericId, notif);
             System.out.println(Util.getTimestamp()
                     + " SocialGraphManager: Sent FOLLOW_REQUEST to " + targetUsername);
         } else if (targetHandler == null) {
@@ -167,10 +169,22 @@ public class SocialGraphManager {
                 return;
         }
 
-        // Queue notification for the requester; delivered upon their next login
+        // 1) Queue offline notification
         NotificationManager.getInstance().addNotification(requesterNumericId, requesterNotification);
 
-        // Immediate confirmation to the target (responder)
+        // 2) Live push to requester if online, then purge queued copy
+        ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
+        if (requesterHandler != null) {
+            requesterHandler.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    requesterNotification
+            ));
+            NotificationManager.getInstance()
+                    .removeNotification(requesterNumericId, requesterNotification);
+        }
+
+        // 3) Immediate confirmation to the responder
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
         if (targetHandler != null) {
             targetHandler.sendExternalMessage(new Message(
@@ -192,20 +206,25 @@ public class SocialGraphManager {
         String targetUsername = msg.getPayload();
         String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
         if (targetNumericId == null) {
-            System.out.println(Util.getTimestamp() + " SocialGraphManager: Unfollow request error – target username '" + targetUsername + "' not found.");
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Unfollow request error – target username '"
+                    + targetUsername + "' not found.");
             return;
         }
 
         // Remove requester from target's followers
         Set<String> targetFollowers = socialGraph.get(targetNumericId);
         if (targetFollowers != null && targetFollowers.remove(requesterNumericId)) {
-            System.out.println(Util.getTimestamp() + " SocialGraphManager: " + requesterUsername + " unfollowed " + targetUsername);
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: " + requesterUsername + " unfollowed " + targetUsername);
         }
 
         // Also remove mutual follow if present
         Set<String> requesterFollowers = socialGraph.get(requesterNumericId);
         if (requesterFollowers != null && requesterFollowers.remove(targetNumericId)) {
-            System.out.println(Util.getTimestamp() + " SocialGraphManager: Also removed " + targetUsername + " from " + requesterUsername + "'s followers.");
+            System.out.println(Util.getTimestamp()
+                    + " SocialGraphManager: Also removed " + targetUsername
+                    + " from " + requesterUsername + "'s followers.");
         }
 
         // Notify the requester
@@ -218,11 +237,21 @@ public class SocialGraphManager {
             ));
         }
 
+        String notif = "User " + requesterUsername + " unfollowed you";
+
         // Queue notification for the target
-        NotificationManager.getInstance().addNotification(
-                targetNumericId,
-                "User " + requesterUsername + " unfollowed you"
-        );
+        NotificationManager.getInstance().addNotification(targetNumericId, notif);
+
+        // If the target is online, push live and purge the queued copy
+        ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
+        if (targetHandler != null) {
+            targetHandler.sendExternalMessage(new Message(
+                    MessageType.DIAGNOSTIC,
+                    "Server",
+                    notif
+            ));
+            NotificationManager.getInstance().removeNotification(targetNumericId, notif);
+        }
     }
 
     /**

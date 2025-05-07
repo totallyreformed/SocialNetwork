@@ -114,7 +114,19 @@ public class FileManager {
             Set<String> followers = SocialGraphManager.getInstance().getFollowers(clientId);
             if (followers != null) {
                 for (String f : followers) {
+                    // queue for offline
                     NotificationManager.getInstance().addNotification(f, notification);
+                    // live push & purge
+                    ClientHandler h = ClientHandler.activeClients.get(f);
+                    if (h != null) {
+                        h.sendExternalMessage(new Message(
+                                MessageType.DIAGNOSTIC,
+                                "Server",
+                                notification
+                        ));
+                        NotificationManager.getInstance()
+                                .removeNotification(f, notification);
+                    }
                 }
             }
 
@@ -132,6 +144,7 @@ public class FileManager {
             e.printStackTrace();
         }
     }
+
 
     /**
      * Handle file search: first tries title lookup, then falls back to filename lookup.
