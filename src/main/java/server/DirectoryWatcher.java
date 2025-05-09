@@ -2,7 +2,6 @@
 package server;
 
 import common.Util;
-
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.Map;
@@ -11,26 +10,28 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DirectoryWatcher implements Runnable {
     private final WatchService watcher;
     private final Path serverRoot;
-    /** path -> lastCopyEpochMilli */
+    /** path -> last copy timestamp (ms) */
     private final Map<Path, Long> recent = new ConcurrentHashMap<>();
-    private static final long DEBOUNCE_MS = 1_000; // 1 s
+    private static final long DEBOUNCE_MS = 2_000; // 2 seconds
 
-    public DirectoryWatcher(String root) throws IOException {
-        this.serverRoot = Paths.get(root);
+    public DirectoryWatcher(String rootDir) throws IOException {
+        this.serverRoot = Paths.get(rootDir);
         this.watcher = FileSystems.getDefault().newWatchService();
 
-        // register each existing client folder
+        // 1) Register any existing client subdirectories
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(serverRoot)) {
             for (Path d : ds) {
                 if (Files.isDirectory(d)) {
                     d.register(watcher,
                             StandardWatchEventKinds.ENTRY_CREATE,
                             StandardWatchEventKinds.ENTRY_MODIFY);
-                    System.out.println(Util.getTimestamp() + " DirectoryWatcher: watching " + d);
+                    System.out.println(Util.getTimestamp()
+                            + " DirectoryWatcher: watching " + d);
                 }
             }
         }
-        // watch root for new client folders
+
+        // 2) Watch the root itself for new subdirectories
         serverRoot.register(watcher, StandardWatchEventKinds.ENTRY_CREATE);
     }
 
@@ -38,61 +39,69 @@ public class DirectoryWatcher implements Runnable {
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
             WatchKey key;
-            try { key = watcher.take(); }
-            catch (InterruptedException ie) { break; }
+            try {
+                key = watcher.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
 
             Path watchedDir = (Path) key.watchable();
-            for (WatchEvent<?> e : key.pollEvents()) {
-                Path name = (Path) e.context();
-                Path full = watchedDir.resolve(name);
-                WatchEvent.Kind<?> kind = e.kind();
+            for (WatchEvent<?> ev : key.pollEvents()) {
+                WatchEvent.Kind<?> kind = ev.kind();
+                Path name = ((WatchEvent<Path>)ev).context();
+                Path fullPath = watchedDir.resolve(name);
 
-                if (SyncRegistry.shouldSkip(full)) { continue; }
-
-                /* register new client sub-dir */
+                // A) If a new client folder appeared under the root, register it
                 if (watchedDir.equals(serverRoot)
                         && kind == StandardWatchEventKinds.ENTRY_CREATE
-                        && Files.isDirectory(full)) {
+                        && Files.isDirectory(fullPath)) {
                     try {
-                        full.register(watcher,
+                        fullPath.register(watcher,
                                 StandardWatchEventKinds.ENTRY_CREATE,
                                 StandardWatchEventKinds.ENTRY_MODIFY);
                         System.out.println(Util.getTimestamp()
-                                + " DirectoryWatcher: registered new folder " + full);
-                    } catch (IOException io) {
+                                + " DirectoryWatcher: registered new folder " + fullPath);
+                    } catch (IOException ioe) {
                         System.err.println(Util.getTimestamp()
-                                + " DirectoryWatcher: cannot register " + full + " : " + io);
+                                + " DirectoryWatcher: can't watch " + fullPath + ": " + ioe.getMessage());
                     }
                     continue;
                 }
 
-                /* ignore root-level events */
+                // B) Ignore events in the root itself (only subdirs matter)
                 if (watchedDir.equals(serverRoot)) continue;
-                if (!Files.isRegularFile(full)) continue;
+                // C) Only handle real files
+                if (!Files.isRegularFile(fullPath)) continue;
 
                 long now = System.currentTimeMillis();
-                Long last = recent.get(full);
+                Long lastTs = recent.get(fullPath);
+                // D) Debounce: if we just copied this path < DEBOUNCE_MS ago, skip
+                if (lastTs != null && (now - lastTs) < DEBOUNCE_MS) {
+                    continue;
+                }
 
-                /* debounce: handle only the first CREATE or if 1 s has passed */
-                if (last != null && now - last < DEBOUNCE_MS) continue;
-                if (kind == StandardWatchEventKinds.ENTRY_MODIFY && last == null) continue;
-
+                // E) Perform the copy to the corresponding ClientFiles folder
                 try {
-                    Path target = Paths.get("ClientFiles", watchedDir.getFileName().toString(), name.toString());
-                    Files.createDirectories(target.getParent());
-                    Files.copy(full, target, StandardCopyOption.REPLACE_EXISTING);
-                    System.out.println(Util.getTimestamp() + " DirectoryWatcher: copied " + name
-                            + " → " + target.getParent());
-                    recent.put(full, now);
-                } catch (IOException io) {
-                    System.err.println(Util.getTimestamp() + " DirectoryWatcher: copy failed "
-                            + full + " : " + io.getMessage());
+                    Path clientDir = Paths.get("ClientFiles", watchedDir.getFileName().toString());
+                    Files.createDirectories(clientDir);
+                    Path dest = clientDir.resolve(name);
+                    Files.copy(fullPath, dest, StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println(Util.getTimestamp()
+                            + " DirectoryWatcher: copied " + name + " → " + clientDir);
+                    recent.put(fullPath, now);
+                } catch (IOException ioe) {
+                    System.err.println(Util.getTimestamp()
+                            + " DirectoryWatcher: copy failed for " + fullPath
+                            + ": " + ioe.getMessage());
                 }
             }
-            key.reset();
-            /* prune old entries */
+
+            if (!key.reset()) break;
+
+            // F) Prune old entries
             long cutoff = System.currentTimeMillis() - DEBOUNCE_MS;
-            recent.entrySet().removeIf(ent -> ent.getValue() < cutoff);
+            recent.entrySet().removeIf(e -> e.getValue() < cutoff);
         }
     }
 }
