@@ -44,6 +44,11 @@ public class SocialGraphManager {
 
     // Checks if the requester (numeric ID) follows the target (numeric ID).
     public boolean isFollowing(String requesterId, String targetId) {
+        // Do not include self-following
+        if (requesterId.equals(targetId)) {
+            System.out.println("SocialGraphManager: isFollowing(" + requesterId + ", " + targetId + ") = false (self-following)");
+            return false;
+        }
         Set<String> followers = socialGraph.get(targetId);
         boolean result = followers != null && followers.contains(requesterId);
         System.out.println("SocialGraphManager: isFollowing(" + requesterId + ", " + targetId + ") = " + result);
