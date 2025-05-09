@@ -1,4 +1,3 @@
-// File: server/ClientHandler.java
 package server;
 
 import java.net.Socket;
@@ -10,25 +9,47 @@ import java.util.concurrent.ConcurrentHashMap;
 import common.Message;
 import common.Message.MessageType;
 
+/**
+ * Handles communication with a connected client, processing incoming messages
+ * according to the social network protocol and sending responses.
+ * Also maintains registries of active clients and their addresses.
+ */
 public class ClientHandler implements Runnable {
+
+    /** The client socket for network communication. */
     private Socket clientSocket;
+    /** Stream for receiving messages from the client. */
     private ObjectInputStream input;
+    /** Stream for sending messages to the client. */
     private ObjectOutputStream output;
 
     private String clientId;     // Numeric ID assigned on signup/login
     private String username;     // Username of this client
 
-    // All active connections, keyed by numeric client ID
+    /**
+     * Registry of all active ClientHandler instances, keyed by clientId.
+     */
     public static ConcurrentHashMap<String, ClientHandler> activeClients = new ConcurrentHashMap<>();
 
-    // Registry mapping clientID → "ip:port"
+    /**
+     * Registry mapping clientId to "ip:port" address of each client.
+     */
     public static ConcurrentHashMap<String, String> clientAddressMap = new ConcurrentHashMap<>();
 
+    /**
+     * Constructs a new handler for the given client socket and logs its creation.
+     *
+     * @param socket the client's connected socket
+     */
     public ClientHandler(Socket socket) {
         this.clientSocket = socket;
         System.out.println("ClientHandler: New instance created for socket " + socket.getInetAddress());
     }
 
+    /**
+     * Main execution loop: establishes I/O streams, listens for incoming
+     * Message objects, and dispatches them to be handled.
+     */
     @Override
     public void run() {
         try {
@@ -57,6 +78,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    /**
+     * Processes a received Message by enforcing authentication state
+     * and routing each MessageType to the appropriate server manager.
+     *
+     * @param msg the Message object received from the client
+     * @throws IOException if sending a response fails
+     */
     private void handleMessage(Message msg) throws IOException {
         // Enforce login before other commands
         if (msg.getType() != MessageType.SIGNUP
@@ -99,7 +127,6 @@ public class ClientHandler implements Runnable {
                             "Signup failed: Invalid format. Use username:password."));
                 }
                 break;
-
             case LOGIN:
                 // Payload format: "username:password"
                 String[] loginParts = msg.getPayload().split(":");
@@ -225,6 +252,12 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    /**
+     * Sends a Message to this client over the output stream.
+     * Logs the send operation.
+     *
+     * @param msg the Message to send
+     */
     private void sendMessage(Message msg) {
         try {
             output.writeObject(msg);
@@ -236,10 +269,20 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // For asynchronously sending messages
+    /**
+     * Retrieves the ObjectOutputStream for external use (e.g., notifications).
+     *
+     * @return the output stream to send Message objects to the client
+     */
     public ObjectOutputStream getOutputStream() {
         return output;
     }
+
+    /**
+     * Sends a Message to the client asynchronously from outside this class.
+     *
+     * @param msg the Message to send
+     */
     public void sendExternalMessage(Message msg) {
         sendMessage(msg);
     }

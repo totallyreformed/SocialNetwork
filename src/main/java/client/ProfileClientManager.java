@@ -5,11 +5,22 @@ import java.io.FileWriter;
 import java.io.IOException;
 import common.Constants;
 
+/**
+ * Manages the local storage of user profile and repost entries by
+ * writing posts and reposts to per-client text files.
+ */
 public class ProfileClientManager {
+
     private String clientId;
     private String profileFileName;
     private String othersProfileFileName;
 
+    /**
+     * Constructs a ProfileClientManager for the specified client,
+     * ensuring the client directory exists and initializing file paths.
+     *
+     * @param clientId the identifier of the client
+     */
     public ProfileClientManager(String clientId) {
         this.clientId = clientId;
         // Ensure per-client directory exists under ClientFiles/
@@ -25,7 +36,11 @@ public class ProfileClientManager {
                 clientDir + "/Others_" + Constants.GROUP_ID + "client" + clientId + ".txt";
     }
 
-    // Append a new post to the local profile.
+    /**
+     * Appends a new post entry to the client's profile file.
+     *
+     * @param post the post content to append
+     */
     public void appendPost(String post) {
         try (FileWriter fw = new FileWriter(new File(profileFileName), true)) {
             fw.write(post + "\n");
@@ -36,7 +51,11 @@ public class ProfileClientManager {
         }
     }
 
-    // Append a new repost entry to the local Others file.
+    /**
+     * Appends a new repost entry to the client's Others file.
+     *
+     * @param repost the repost information to append
+     */
     public void appendRepost(String repost) {
         try (FileWriter fw = new FileWriter(new File(othersProfileFileName), true)) {
             fw.write(repost + "\n");

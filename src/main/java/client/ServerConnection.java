@@ -6,6 +6,10 @@ import java.net.Socket;
 import common.Constants;
 import java.io.IOException;
 
+/**
+ * Manages the persistent connection between the client and server,
+ * handling socket creation, message sending, and client identification.
+ */
 public class ServerConnection {
     private Socket socket;
     private ObjectOutputStream output;
@@ -13,6 +17,12 @@ public class ServerConnection {
     // Use a default placeholder; this will be updated silently when auth succeeds.
     private String clientId = "clientID_placeholder";
 
+    /**
+     * Establishes a socket connection to the server and starts
+     * a listener thread for incoming messages.
+     *
+     * @return true if connection succeeds; false on I/O error
+     */
     public boolean connect() {
         try {
             socket = new Socket("localhost", Constants.SERVER_PORT);
@@ -27,7 +37,12 @@ public class ServerConnection {
         }
     }
 
-    // Updated: This method no longer prints the detailed debug information.
+    /**
+     * Sends a Message object to the server over the established connection.
+     * Suppresses detailed client-side debug logging.
+     *
+     * @param msg the Message to send
+     */
     public void sendMessage(common.Message msg) {
         try {
             output.writeObject(msg);
@@ -38,11 +53,21 @@ public class ServerConnection {
         }
     }
 
-    // Updated: Set client ID without printing verbose logs.
+    /**
+     * Retrieves the current client identifier.
+     *
+     * @return the client ID string, or placeholder if not set
+     */
     public String getClientId() {
         return clientId;
     }
 
+    /**
+     * Updates the client identifier used for subsequent communications.
+     * Internal session details are not logged to the console.
+     *
+     * @param clientId the new client ID to set
+     */
     public void setClientId(String clientId) {
         this.clientId = clientId;
         // Suppressed: Do not print internal session update details.

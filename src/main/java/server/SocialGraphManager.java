@@ -7,14 +7,28 @@ import common.Util;
 import java.util.*;
 import java.io.*;
 
+/**
+ * Singleton managing the social graph of follower relationships among clients.
+ * Supports loading from file, follow/unfollow operations, listing followers/following,
+ * and dispatching follow request and response messages.
+ */
 public class SocialGraphManager {
+    /** Singleton instance of SocialGraphManager. */
     private static SocialGraphManager instance = null;
 
-    // Maps numeric client IDs (as Strings) to sets of follower numeric IDs.
+    /**
+     * Maps each client numeric ID to the set of IDs that follow them.
+     */
     private HashMap<String, Set<String>> socialGraph = new HashMap<>();
 
+    /** Private constructor for singleton pattern. */
     private SocialGraphManager() { }
 
+    /**
+     * Returns the singleton instance, creating it if necessary.
+     *
+     * @return the SocialGraphManager instance
+     */
     public static SocialGraphManager getInstance() {
         if (instance == null) {
             instance = new SocialGraphManager();
@@ -22,7 +36,12 @@ public class SocialGraphManager {
         return instance;
     }
 
-    // Loads the social graph from a predetermined file (with numeric IDs).
+    /**
+     * Loads the social graph from a text file where each line contains a client ID
+     * followed by its follower IDs separated by whitespace.
+     *
+     * @param filename the path to the social graph file
+     */
     public void loadSocialGraph(String filename) {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
@@ -42,7 +61,14 @@ public class SocialGraphManager {
         }
     }
 
-    // Checks if the requester (numeric ID) follows the target (numeric ID).
+    /**
+     * Determines whether a requester follows a target client.
+     * Self-following is always false.
+     *
+     * @param requesterId the numeric ID of the requesting client
+     * @param targetId    the numeric ID of the target client
+     * @return true if requester follows target; false otherwise
+     */
     public boolean isFollowing(String requesterId, String targetId) {
         // Do not include self-following
         if (requesterId.equals(targetId)) {
@@ -56,7 +82,10 @@ public class SocialGraphManager {
     }
 
     /**
-     * Returns the set of clientIds that the given client follows.
+     * Retrieves the set of client IDs that the given client follows.
+     *
+     * @param clientId the numeric ID of the client
+     * @return a Set of numeric IDs that clientId follows
      */
     public Set<String> getFollowees(String clientId) {
         Set<String> followees = new HashSet<>();
@@ -69,9 +98,10 @@ public class SocialGraphManager {
     }
 
     /**
-     * Handles a follow request.
-     * Notifies the target (immediately if online, or upon next login) and
-     * confirms to the requester.
+     * Processes an incoming follow request by queuing a notification for the target user,
+     * confirming to the requester, and sending a live prompt if the target is online.
+     *
+     * @param msg the Message containing follower-target payload and sender ID
      */
     public void handleFollow(Message msg) {
         String requesterNumericId = msg.getSenderId();
@@ -87,10 +117,10 @@ public class SocialGraphManager {
 
         String notif = "User " + requesterUsername + " requested to follow you";
 
-        // 1) Queue offline notification
+        // Queue offline notification
         NotificationManager.getInstance().addNotification(targetNumericId, notif);
 
-        // 2) Confirm to the requester
+        // Confirm to requester
         ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
         if (requesterHandler != null) {
             requesterHandler.sendExternalMessage(new Message(
@@ -100,10 +130,9 @@ public class SocialGraphManager {
             ));
         }
 
-        // 3) If the target is online *and* is a different handler than the requester, push live
+        // Live prompt if target is online and not the same handler
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
         if (targetHandler != null && targetHandler != requesterHandler) {
-            // live prompt
             Message followRequest = new Message(
                     MessageType.FOLLOW_REQUEST,
                     "Server",
@@ -121,8 +150,10 @@ public class SocialGraphManager {
     }
 
     /**
-     * Handles a follow response from the target client.
-     * Expected payload format: "requesterUsername:decision"
+     * Processes a follow response by updating the social graph according to
+     * "accept", "reciprocate", or "reject" decision, then notifying both parties.
+     *
+     * @param msg the Message containing requesterUsername:decision payload
      */
     public void handleFollowResponse(Message msg) {
         String payload = msg.getPayload();
@@ -174,10 +205,10 @@ public class SocialGraphManager {
                 return;
         }
 
-        // 1) Queue offline notification
+        // Queue and send notifications
         NotificationManager.getInstance().addNotification(requesterNumericId, requesterNotification);
 
-        // 2) Live push to requester if online, then purge queued copy
+        // Live push to requester if online, then purge queued copy
         ClientHandler requesterHandler = ClientHandler.activeClients.get(requesterNumericId);
         if (requesterHandler != null) {
             requesterHandler.sendExternalMessage(new Message(
@@ -189,7 +220,7 @@ public class SocialGraphManager {
                     .removeNotification(requesterNumericId, requesterNotification);
         }
 
-        // 3) Immediate confirmation to the responder
+        // Immediate confirmation to the responder
         ClientHandler targetHandler = ClientHandler.activeClients.get(targetNumericId);
         if (targetHandler != null) {
             targetHandler.sendExternalMessage(new Message(
@@ -201,9 +232,10 @@ public class SocialGraphManager {
     }
 
     /**
-     * Handles an unfollow request.
-     * Updates the graph, notifies the requester immediately, and queues a notification
-     * for the target.
+     * Processes an unfollow request by removing the relationship,
+     * notifying the requester immediately and the target asynchronously.
+     *
+     * @param msg the Message containing the target username payload
      */
     public void handleUnfollow(Message msg) {
         String requesterNumericId = msg.getSenderId();
@@ -260,7 +292,11 @@ public class SocialGraphManager {
     }
 
     /**
-     * NEW: Handle client's request to list their followers.
+     * Handles a request to list followers by sending back a comma-separated
+     * list of usernames of clients who follow the requester.
+     *
+     * @param msg    the Message with sender indicating whose followers to list
+     * @param output the stream to send LIST_FOLLOWERS_RESPONSE
      */
     public void handleListFollowers(Message msg, ObjectOutputStream output) {
         String requesterId = msg.getSenderId();
@@ -286,7 +322,11 @@ public class SocialGraphManager {
     }
 
     /**
-     * NEW: Handle client's request to list who they follow.
+     * Handles a request to list followees by sending back a comma-separated
+     * list of usernames that the requester is following.
+     *
+     * @param msg    the Message with sender indicating whose followees to list
+     * @param output the stream to send LIST_FOLLOWING_RESPONSE
      */
     public void handleListFollowing(Message msg, ObjectOutputStream output) {
         String requesterId = msg.getSenderId();
@@ -311,9 +351,13 @@ public class SocialGraphManager {
         }
     }
 
-    // Helper method: Given a numeric id, retrieve its corresponding client record.
+    /**
+     * Retrieves the set of client IDs that follow the specified client.
+     *
+     * @param uploaderNumericId the numeric ID of the client whose followers to retrieve
+     * @return a Set of follower numeric IDs
+     */
     public Set<String> getFollowers(String uploaderNumericId) {
         return socialGraph.getOrDefault(uploaderNumericId, new HashSet<>());
     }
-
 }

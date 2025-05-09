@@ -1,4 +1,3 @@
-// server/ProfileManager.java
 package server;
 
 import common.Constants;
@@ -18,33 +17,54 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Manages user profile operations including locking for concurrent access,
+ * appending posts and comments, handling profile viewing, and reposts.
+ * Uses fine-grained locking, timeout warnings, and notification queuing.
+ */
 public class ProfileManager {
+
     // --- Locking infrastructure for concurrent profile access ---
-    private ConcurrentHashMap<String, Boolean> locks         = new ConcurrentHashMap<>();
+    /** Indicates locked state per client profile. */
+    private ConcurrentHashMap<String, Boolean> locks = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, String> lockOwners = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Queue<String>> waitingQueues = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, Timer>    timers        = new ConcurrentHashMap<>();
+    /** Timers to enforce lock timeouts and warnings. */
+    private ConcurrentHashMap<String, Timer> timers = new ConcurrentHashMap<>();
 
     // --- Counters to assign unique post IDs per client ---
+    /** Per-client counters to generate unique post IDs. */
     private ConcurrentHashMap<String, AtomicInteger> postIdCounters = new ConcurrentHashMap<>();
 
+    /** Singleton instance. */
     private static ProfileManager instance = null;
+
+    /** Private constructor for singleton pattern. */
     private ProfileManager() { }
+
+    /**
+     * Returns the singleton ProfileManager instance.
+     * @return the ProfileManager instance
+     */
     public static ProfileManager getInstance() {
         if (instance == null) instance = new ProfileManager();
         return instance;
     }
 
     /**
-     * Lock the profile for exclusive access; queue up others.
-     * Also records the owner so we can warn them on timeout.
+     * Attempts to lock the specified client profile for exclusive access.
+     * If already locked, queues requester and sends a diagnostic denial.
+     * Issues a timeout warning and automatic unlock after configured delay.
+     *
+     * @param clientId     the profile owner ID
+     * @param requesterId  the requesting client ID
+     * @return true if lock acquired; false if queued for later
      */
     public synchronized boolean lockProfile(String clientId, String requesterId) {
         if (locks.containsKey(clientId)) {
             waitingQueues.putIfAbsent(clientId, new LinkedList<>());
             waitingQueues.get(clientId).offer(requesterId);
-
-            // Send immediate denial diagnostic to the requester
+            // Notify denial to requester
             ClientHandler handler = ClientHandler.activeClients.get(requesterId);
             if (handler != null) {
                 try {
@@ -54,20 +74,19 @@ public class ProfileManager {
                     handler.getOutputStream().flush();
                 } catch (IOException ignored) { }
             }
-
             System.out.println(Util.getTimestamp()
                     + " ProfileManager: Client " + requesterId
                     + " queued for profile " + clientId);
             return false;
         } else {
             locks.put(clientId, true);
-            lockOwners.put(clientId, requesterId);  // NEW
-
+            lockOwners.put(clientId, requesterId);
+            // Schedule timeout warning and auto-unlock
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
                 @Override
                 public void run() {
-                    // 1) Warn the owner that their lock is expiring
+                    // Warn lock owner
                     String owner = lockOwners.get(clientId);
                     ClientHandler ownerHandler = ClientHandler.activeClients.get(owner);
                     if (ownerHandler != null) {
@@ -80,7 +99,7 @@ public class ProfileManager {
                             ownerHandler.getOutputStream().flush();
                         } catch (IOException ignored) { }
                     }
-                    // 2) Actually release the lock
+                    // Actually release the lock
                     System.out.println(Util.getTimestamp()
                             + " ProfileManager: Lock timeout for profile " + clientId);
                     unlockProfile(clientId);
@@ -95,11 +114,12 @@ public class ProfileManager {
     }
 
     /**
-     * Unlock and notify next waiter.
+     * Releases the lock on the given profile and notifies the next waiting client.
+     * @param clientId the profile owner ID
      */
     public synchronized void unlockProfile(String clientId) {
         locks.remove(clientId);
-        lockOwners.remove(clientId);                                                  // NEW
+        lockOwners.remove(clientId);
         Timer t = timers.remove(clientId);
         if (t != null) t.cancel();
         System.out.println(Util.getTimestamp() + " ProfileManager: Profile " + clientId + " unlocked.");
@@ -120,7 +140,11 @@ public class ProfileManager {
     }
 
     /**
-     * Append a new post: assigns a unique postId and writes it.
+     * Appends a new post entry to the owner's profile file with a unique post ID.
+     * Uses locking to ensure exclusive write access and releases lock afterward.
+     *
+     * @param clientId the owner client ID
+     * @param content  the post content text
      */
     public synchronized void updateProfile(String clientId, String content) {
         if (!lockProfile(clientId, clientId)) {
@@ -162,7 +186,12 @@ public class ProfileManager {
     }
 
     /**
-     * Add a comment to a specific post by postId, then queue notifications.
+     * Appends a comment to a specific post in a target user's profile and
+     * sends notifications to the post author and their followers.
+     * @param targetId      the profile owner ID
+     * @param postId        the ID of the post being commented on
+     * @param commenterId   the client ID of the commenter
+     * @param comment       the comment text
      */
     public synchronized void addCommentToPost(String targetId,
                                               String postId,
@@ -199,7 +228,7 @@ public class ProfileManager {
             e.printStackTrace();
         }
 
-        // Prepare notification
+        // Notify author and followers
         String notif = "New comment on post " + postId
                 + " from " + commenterName + ": " + comment;
 
@@ -237,12 +266,14 @@ public class ProfileManager {
         unlockProfile(targetId);
     }
 
-
     /**
-     * Handle access_profile requests:
-     * - Verify follow status
-     * - Read ServerFiles/<GROUP_ID>client<targetId>/Profile_<GROUP_ID>client<targetId>.txt
-     * - Two-pass parse: first collect all comments, then print posts with their comments
+     * Handles access_profile requests by verifying follow relationship,
+     * reading and parsing the target's profile file, and streaming posts
+     * and their associated comments back to the requester.
+     *
+     * @param msg                  the access_profile Message
+     * @param requesterNumericId   the numeric ID of the requesting client
+     * @param output               the ObjectOutputStream to send messages
      */
     public static void handleAccessProfile(Message msg,
                                            String requesterNumericId,
@@ -336,9 +367,12 @@ public class ProfileManager {
     }
 
     /**
-     * Handle repost requests: append to server's Others file under
-     * ServerFiles/<GROUP_ID>client<requesterId>, notify reposting client,
-     * instruct client to sync locally, and queue a notification for the original author.
+     * Handles repost requests by copying the original post into the requester’s
+     * Others file, instructing the client to sync locally, and notifying the original author.
+     *
+     * @param msg                    the repost Message containing target_username:postId
+     * @param requesterNumericId     the numeric ID of the reposting client
+     * @param output                 the ObjectOutputStream to send responses
      */
     public static void handleRepost(Message msg,
                                     String requesterNumericId,

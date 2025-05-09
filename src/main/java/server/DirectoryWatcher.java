@@ -1,4 +1,3 @@
-// File: server/DirectoryWatcher.java
 package server;
 
 import common.Util;
@@ -7,18 +6,37 @@ import java.nio.file.*;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Watches a server root directory for new and modified client subdirectories
+ * and files, mirroring changes to the corresponding ClientFiles folder
+ * with a debounce to prevent rapid duplicate copies.
+ */
 public class DirectoryWatcher implements Runnable {
-    private final WatchService watcher;
-    private final Path serverRoot;
-    /** path -> last copy timestamp (ms) */
-    private final Map<Path, Long> recent = new ConcurrentHashMap<>();
-    private static final long DEBOUNCE_MS = 2_000; // 2 seconds
 
+    /** WatchService to monitor filesystem events. */
+    private final WatchService watcher;
+
+    /** Root directory path under which client folders reside. */
+    private final Path serverRoot;
+
+    /** Map tracking last copy timestamp (milliseconds) for each path. */
+    private final Map<Path, Long> recent = new ConcurrentHashMap<>();
+
+    /** Minimum interval in milliseconds between successive copies of the same file. */
+    private static final long DEBOUNCE_MS = 2_000;
+
+    /**
+     * Constructs a DirectoryWatcher for the given root directory, registers
+     * existing subdirectories and the root for creation events.
+     *
+     * @param rootDir path to the server root directory to watch
+     * @throws IOException if an I/O error occurs creating the watch service
+     */
     public DirectoryWatcher(String rootDir) throws IOException {
         this.serverRoot = Paths.get(rootDir);
         this.watcher = FileSystems.getDefault().newWatchService();
 
-        // 1) Register any existing client subdirectories
+        // 1) Register existing client subdirectories
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(serverRoot)) {
             for (Path d : ds) {
                 if (Files.isDirectory(d)) {
@@ -35,6 +53,12 @@ public class DirectoryWatcher implements Runnable {
         serverRoot.register(watcher, StandardWatchEventKinds.ENTRY_CREATE);
     }
 
+    /**
+     * Runs the watch loop, handling directory and file events:
+     * Registers new client folders
+     * Copies new or modified files with debouncing
+     * Prunes old timestamp entries
+     */
     @Override
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
@@ -49,10 +73,10 @@ public class DirectoryWatcher implements Runnable {
             Path watchedDir = (Path) key.watchable();
             for (WatchEvent<?> ev : key.pollEvents()) {
                 WatchEvent.Kind<?> kind = ev.kind();
-                Path name = ((WatchEvent<Path>)ev).context();
+                Path name = ((WatchEvent<Path>) ev).context();
                 Path fullPath = watchedDir.resolve(name);
 
-                // A) If a new client folder appeared under the root, register it
+                // A) New client folder created under root: register it
                 if (watchedDir.equals(serverRoot)
                         && kind == StandardWatchEventKinds.ENTRY_CREATE
                         && Files.isDirectory(fullPath)) {
@@ -69,19 +93,19 @@ public class DirectoryWatcher implements Runnable {
                     continue;
                 }
 
-                // B) Ignore events in the root itself (only subdirs matter)
+                // B) Ignore root-level events (only subdirectories matter)
                 if (watchedDir.equals(serverRoot)) continue;
-                // C) Only handle real files
+                // C) Only process regular files
                 if (!Files.isRegularFile(fullPath)) continue;
 
                 long now = System.currentTimeMillis();
                 Long lastTs = recent.get(fullPath);
-                // D) Debounce: if we just copied this path < DEBOUNCE_MS ago, skip
+                // D) Debounce: skip if recently processed
                 if (lastTs != null && (now - lastTs) < DEBOUNCE_MS) {
                     continue;
                 }
 
-                // E) Perform the copy to the corresponding ClientFiles folder
+                // E) Copy file to corresponding ClientFiles folder
                 try {
                     Path clientDir = Paths.get("ClientFiles", watchedDir.getFileName().toString());
                     Files.createDirectories(clientDir);
@@ -99,7 +123,7 @@ public class DirectoryWatcher implements Runnable {
 
             if (!key.reset()) break;
 
-            // F) Prune old entries
+            // F) Remove entries older than debounce interval
             long cutoff = System.currentTimeMillis() - DEBOUNCE_MS;
             recent.entrySet().removeIf(e -> e.getValue() < cutoff);
         }

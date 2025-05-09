@@ -3,12 +3,22 @@ package server;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-// Helper class to hold user data.
+/**
+ * Record holding a user's credentials and assigned numeric ID.
+ */
 class ClientRecord {
     String username;
     String password;
     String numericId; // Auto-generated numeric id as a string.
 
+    /**
+     * Constructs a new ClientRecord with the given username, password,
+     * and numeric ID.
+     *
+     * @param username  the user's username
+     * @param password  the user's password
+     * @param numericId the assigned numeric client ID
+     */
     public ClientRecord(String username, String password, String numericId) {
         this.username = username;
         this.password = password;
@@ -16,6 +26,10 @@ class ClientRecord {
     }
 }
 
+/**
+ * Manages user authentication by handling signup and login operations,
+ * storing user credentials, and mapping usernames to numeric client IDs.
+ */
 public class AuthenticationManager {
     // Map from username to ClientRecord.
     private static ConcurrentHashMap<String, ClientRecord> userRecords = new ConcurrentHashMap<>();

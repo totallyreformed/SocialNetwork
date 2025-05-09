@@ -1,4 +1,3 @@
-// File: client/CommandHandler.java
 package client;
 
 import java.util.Scanner;
@@ -13,13 +12,30 @@ import java.nio.file.Path;
 import java.io.IOException;
 import java.util.Base64;
 
+/**
+ * Handles user commands by reading input from the console, parsing
+ * command strings, and sending appropriate messages to the server.
+ */
 public class CommandHandler {
+
+    /**
+     * Connection to the server for sending and receiving messages.
+     */
     private ServerConnection connection;
 
+    /**
+     * Constructs a CommandHandler with the given server connection.
+     *
+     * @param connection the ServerConnection to use for communication
+     */
     public CommandHandler(ServerConnection connection) {
         this.connection = connection;
     }
 
+    /**
+     * Starts the interactive command loop, printing available commands,
+     * reading user input, and dispatching commands until 'exit' is entered.
+     */
     public void start() {
         printCommandList();
         Scanner scanner = new Scanner(System.in);
@@ -32,6 +48,10 @@ public class CommandHandler {
         scanner.close();
     }
 
+    /**
+     * Prints the list of supported commands along with their formats
+     * and examples to guide the user.
+     */
     private void printCommandList() {
         System.out.println("======================================");
         System.out.println("Available Commands:");
@@ -65,6 +85,12 @@ public class CommandHandler {
         System.out.println("======================================");
     }
 
+    /**
+     * Parses and processes a single user command string, checking login status
+     * and dispatching to the appropriate handler or printing an error message.
+     *
+     * @param input the full command line entered by the user
+     */
     private void processCommand(String input) {
         String[] parts = input.split(" ", 2);
         String command = parts[0].toLowerCase();
@@ -159,6 +185,14 @@ public class CommandHandler {
         }
     }
 
+    /**
+     * Processes the 'upload' command by validating the payload format,
+     * reading the specified file from the local directory, encoding its data,
+     * and sending an upload message to the server.
+     *
+     * @param payload  the raw command payload (title, filename, and caption)
+     * @param clientId the ID of the client performing the upload
+     */
     private void processUploadCommand(String payload, String clientId) {
         Pattern pattern = Pattern.compile("^([^:]+):(\\S+)\\s+<(.+)>$");
         Matcher matcher = pattern.matcher(payload);

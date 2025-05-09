@@ -1,4 +1,3 @@
-// File: server/FileManager.java
 package server;
 
 import common.Message;
@@ -17,17 +16,37 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+/**
+ * Manages photo file operations including upload, search, and download.
+ * Supports Base64 encoding/decoding, storage in server directories,
+ * ownership tracking, and client notifications.
+ */
 public class FileManager {
 
+    /**
+     * Maps a filename to the set of client IDs owning that photo.
+     */
     private static ConcurrentHashMap<String, Set<String>> photoOwners = new ConcurrentHashMap<>();
+    /**
+     * Maps a lowercase photo title to the set of client IDs owning that title.
+     */
     private static ConcurrentHashMap<String, Set<String>> titleOwners = new ConcurrentHashMap<>();
+    /**
+     * Maps a lowercase photo title to a representative filename for lookup.
+     */
     private static ConcurrentHashMap<String, String> titleToFileName = new ConcurrentHashMap<>();
 
     /**
-     * Handle file upload: if base64 data is provided, decode it; otherwise
-     * read the file from the client's local directory under ClientFiles/<group>client<id>.
-     * Saves into per-client subdir, updates profile, notifies followers, and records
-     * the owner for both filename and title search.
+     * Handles a client upload request by saving the photo and caption,
+     * updating search indices, notifying followers, and sending a response.
+     *<p>
+     * Parses the payload for title, filename, caption, and data; decodes or reads
+     * file bytes; writes to ServerFiles; updates photoOwners and titleOwners;
+     * notifies followers and the uploading client via diagnostic messages.
+     *
+     * @param msg      the upload Message containing metadata and optional Base64 data
+     * @param clientId the numeric ID of the uploading client
+     * @param output   the ObjectOutputStream to send response Messages
      */
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
@@ -48,14 +67,14 @@ public class FileManager {
         }
 
         try {
-            // Ensure server sub‑directory exists
+            // Ensure server sub-directory exists
             File dir = new File("ServerFiles/" + Constants.GROUP_ID + "client" + clientId);
             if (!dir.exists()) {
                 dir.mkdirs();
                 System.out.println(Util.getTimestamp() + " FileManager: Created directory " + dir.getPath());
             }
 
-            // Determine file bytes: either from base64 or from the client's local folder
+            // Determine file bytes: from Base64 or client folder
             byte[] fileBytes;
             if (!base64Data.isEmpty()) {
                 fileBytes = Base64.getDecoder().decode(base64Data);
@@ -66,7 +85,7 @@ public class FileManager {
                 fileBytes = Files.readAllBytes(clientPath);
             }
 
-            // Save the photo file on server
+            // Save photo file on server
             File photoFile = new File(dir, fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(fileBytes);
@@ -87,7 +106,7 @@ public class FileManager {
                     .add(clientId);
             titleToFileName.putIfAbsent(key, fileName);
 
-            // Determine caption text: from payload or from client's local caption file
+            // Determine caption text and save on server
             String captionText = caption;
             if (captionText.isEmpty()) {
                 Path clientCaption = Paths.get("ClientFiles",
@@ -97,8 +116,6 @@ public class FileManager {
                     captionText = new String(Files.readAllBytes(clientCaption));
                 }
             }
-
-            // Save the caption on server
             File captionFile = new File(dir, fileName + ".txt");
             try (FileOutputStream fos = new FileOutputStream(captionFile)) {
                 fos.write(captionText.getBytes());
@@ -107,7 +124,7 @@ public class FileManager {
             // Mark this file so DirectoryWatcher will skip re-syncing it
             SyncRegistry.markEvent(captionFile.toPath());
 
-            // Update profile, notify followers
+            // Notify followers of new upload
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
             String uploaderUsername = AuthenticationManager.getUsernameByNumericId(clientId);
             String notification = "User " + uploaderUsername + " uploaded " + photoTitle;
@@ -130,7 +147,7 @@ public class FileManager {
                 }
             }
 
-            // Send success diagnostic
+            // Acknowledge successful upload
             output.writeObject(new Message(
                     MessageType.DIAGNOSTIC,
                     "Server",
@@ -145,10 +162,13 @@ public class FileManager {
         }
     }
 
-
     /**
-     * Handle file search: first tries title lookup, then falls back to filename lookup.
-     * Returns the actual fileName in the diagnostic so that downloads use the correct name.
+     * Processes a search request for photos by title or filename, filters results
+     * to the client's followees, and returns a diagnostic message listing matches.
+     *
+     * @param msg      the search Message containing the query
+     * @param clientId the numeric ID of the searching client
+     * @param output   the ObjectOutputStream to send the search result
      */
     public static void handleSearch(Message msg,
                                     String clientId,
@@ -192,7 +212,15 @@ public class FileManager {
     }
 
     /**
-     * Handle file download: parses ownerName:imageFile, looks up ownerId, then streams chunks.
+     * Handles a download request by performing a handshake and streaming
+     * file chunks with stop-and-wait reliability, then sends captions and EOF.
+     *
+     * @param msg           the download Message specifying owner and filename
+     * @param downloaderId  the numeric ID of the downloading client
+     * @param clientSocket  the Socket for the client connection
+     * @param input         the ObjectInputStream to receive ACKs
+     * @param output        the ObjectOutputStream to send chunks and messages
+     * @throws IOException if an I/O error occurs during transfer
      */
     public static void handleDownload(Message msg,
                                       String downloaderId,
@@ -232,7 +260,7 @@ public class FileManager {
         InputStream rawIn = clientSocket.getInputStream();
 
         try {
-            // 4) 3-way handshake
+            // 4) Three-way handshake
             output.writeObject(new Message(MessageType.HANDSHAKE, "Server",
                     "Initiate handshake for " + photoName));
             output.flush();
@@ -242,8 +270,7 @@ public class FileManager {
             while (System.currentTimeMillis() - hsStart < 5000) {
                 if (rawIn.available() > 0) {
                     hsAck = (Message) input.readObject();
-                    if (hsAck.getType() == MessageType.ACK
-                            && hsAck.getPayload().contains("handshake")) {
+                    if (hsAck.getType() == MessageType.ACK && hsAck.getPayload().contains("handshake")) {
                         break;
                     }
                 }
@@ -255,14 +282,14 @@ public class FileManager {
             }
             System.out.println(Util.getTimestamp() + " FileManager: Handshake complete");
 
-            // 5) Prepare Base64 data
+            // 5) Read and encode file
             byte[] bytes  = Files.readAllBytes(photoFile.toPath());
             String base64 = Base64.getEncoder().encodeToString(bytes);
             int totalLen  = base64.length();
             int chunkSize = totalLen / Constants.NUM_CHUNKS;
             if (chunkSize == 0) chunkSize = totalLen;
 
-            // 6) Stop-and-wait with retransmit on timeout
+            // 6) Stop-and-wait chunk transfer with retransmission
             for (int i = 1; i <= Constants.NUM_CHUNKS; i++) {
                 int start = (i - 1) * chunkSize;
                 int end   = (i == Constants.NUM_CHUNKS) ? totalLen : i * chunkSize;
@@ -271,9 +298,7 @@ public class FileManager {
                         "Chunk " + i + ": " + content);
 
                 int attempts = 0;
-                long timeout = Constants.TIMEOUT_MILLISECONDS;
                 boolean ackReceived = false;
-
                 while (attempts < 2 && !ackReceived) {
                     // send chunk
                     output.writeObject(chunkMsg);
@@ -283,7 +308,7 @@ public class FileManager {
 
                     // wait for ACK or timeout
                     long sendTime = System.currentTimeMillis();
-                    while (System.currentTimeMillis() - sendTime < timeout) {
+                    while (System.currentTimeMillis() - sendTime < Constants.TIMEOUT_MILLISECONDS) {
                         if (rawIn.available() > 0) {
                             Message resp = (Message) input.readObject();
                             if (resp.getType() == MessageType.ACK
@@ -321,11 +346,10 @@ public class FileManager {
                     output.flush();
                     return;
                 }
-
                 // if there’s a delayed second ACK for the same chunk, it will be read by the next iteration’s rawIn.available() but ignored
             }
 
-            // 7) Send caption or no-caption
+            // 7) Send caption or notify none
             if (captionFile.exists()) {
                 String cap = new String(Files.readAllBytes(captionFile.toPath()));
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
@@ -336,7 +360,7 @@ public class FileManager {
             }
             output.flush();
 
-            // 8) Final completion
+            // 8) Signal end of transmission
             output.writeObject(new Message(MessageType.FILE_END, "Server",
                     "The transmission is completed"));
             output.flush();

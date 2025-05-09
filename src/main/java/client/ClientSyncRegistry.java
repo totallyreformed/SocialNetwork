@@ -1,4 +1,3 @@
-// File: client/ClientSyncRegistry.java
 package client;
 
 import java.nio.file.Path;

@@ -1,4 +1,3 @@
-// File: client/ServerListener.java
 package client;
 
 import java.io.ObjectInputStream;
@@ -9,33 +8,52 @@ import common.Message;
 import common.Message.MessageType;
 import common.Constants;
 
+/**
+ * Listens for incoming messages from the server and dispatches
+ * actions such as authentication handling, follow requests,
+ * search responses, and file transfer events.
+ */
 public class ServerListener implements Runnable {
+
     private ObjectInputStream input;
     private ServerConnection connection;
     private ProfileClientManager profileClientManager;
     private String lastDownloadFileName = null;
 
+    /**
+     * Constructs a ServerListener with the given input stream and connection.
+     *
+     * @param input      the ObjectInputStream for receiving Message objects
+     * @param connection the ServerConnection to use for sending replies
+     */
     public ServerListener(ObjectInputStream input, ServerConnection connection) {
         this.input = input;
         this.connection = connection;
     }
 
+    /**
+     * Continuously reads Message objects from the server and handles
+     * them based on their MessageType, including auth, follow,
+     * search, notifications, and file transfer events.
+     */
     @Override
     public void run() {
         try {
             Message msg;
             while ((msg = (Message) input.readObject()) != null) {
+                // Handle authentication success
                 if (msg.getType() == MessageType.AUTH_SUCCESS) {
                     connection.setClientId(msg.getSenderId());
                     profileClientManager = new ProfileClientManager(msg.getSenderId());
                     System.out.println(msg.getPayload());
                     continue;
                 }
+                // Handle authentication failure
                 if (msg.getType() == MessageType.AUTH_FAILURE) {
                     System.out.println(msg.getPayload());
                     continue;
                 }
-
+                // Handle listing followers response
                 if (msg.getType() == MessageType.LIST_FOLLOWERS_RESPONSE) {
                     String payload = msg.getPayload();
                     if (payload.isEmpty()) {
@@ -45,7 +63,7 @@ public class ServerListener implements Runnable {
                     }
                     continue;
                 }
-
+                // Handle listing following response
                 if (msg.getType() == MessageType.LIST_FOLLOWING_RESPONSE) {
                     String payload = msg.getPayload();
                     if (payload.isEmpty()) {
@@ -55,21 +73,22 @@ public class ServerListener implements Runnable {
                     }
                     continue;
                 }
-
+                // Handle diagnostic messages (search, captions, repost sync, notifications)
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
-
                     if (p.startsWith("Search: found photo ")) {
+                        // Process search result and initiate download
                         System.out.println(p);
                         String[] parts = p.split(" at: ");
                         if (parts.length == 2) {
                             String file = parts[0].substring("Search: found photo ".length());
                             String[] owners = parts[1].split(",");
                             int ri = new java.util.Random().nextInt(owners.length);
-                            String chosenToken = owners[ri];        // "3(alice)"
-                            // extract ownerName inside parentheses
-                            String ownerName = chosenToken
-                                    .substring(chosenToken.indexOf('(')+1, chosenToken.indexOf(')'));
+                            String chosenToken = owners[ri];
+                            String ownerName = chosenToken.substring(
+                                    chosenToken.indexOf('(') + 1,
+                                    chosenToken.indexOf(')')
+                            );
                             System.out.println("Initiating download of " + file
                                     + " from user " + ownerName);
                             lastDownloadFileName = file;
@@ -77,17 +96,16 @@ public class ServerListener implements Runnable {
                             connection.sendMessage(new Message(
                                     MessageType.DOWNLOAD,
                                     connection.getClientId(),
-                                    downloadPayload));
+                                    downloadPayload
+                            ));
                             FileTransferHandler.downloadFile(downloadPayload, connection);
                         }
                         continue;
                     }
-
                     if (p.startsWith("Search: no followees")) {
                         System.out.println(p);
                         continue;
                     }
-
                     if (p.startsWith("Caption: ")) {
                         String captionText = p.substring("Caption: ".length());
                         saveCaptionFile(captionText);
@@ -97,27 +115,23 @@ public class ServerListener implements Runnable {
                         saveCaptionFile("");
                         continue;
                     }
-
                     if (p.startsWith("SYNC_REPOST:")) {
                         String entry = p.substring("SYNC_REPOST:".length());
                         profileClientManager.appendRepost(entry);
                         System.out.println("Local Others file updated with repost: " + entry);
                         continue;
                     }
-
                     if (p.startsWith("Notification:")) {
                         profileClientManager.appendPost(p);
                         System.out.println(p);
                         continue;
                     }
-
                     if (!p.contains("handshake") && !p.contains("Chunk")) {
                         System.out.println(p);
                     }
                 }
-
+                // Handle follow request notifications
                 if (msg.getType() == MessageType.FOLLOW_REQUEST) {
-                    // Interactive prompt for live follow requests
                     String[] parts = msg.getPayload().split(":", 2);
                     String requesterUsername = parts[0];
                     System.out.println("\n>>> User '" + requesterUsername + "' wants to follow you.");
@@ -125,7 +139,7 @@ public class ServerListener implements Runnable {
                     System.out.print("> ");
                     continue;
                 }
-
+                // Handle file transfer protocol messages
                 if (msg.getType() == MessageType.HANDSHAKE
                         || msg.getType() == MessageType.FILE_CHUNK
                         || msg.getType() == MessageType.FILE_END
@@ -145,6 +159,12 @@ public class ServerListener implements Runnable {
         }
     }
 
+    /**
+     * Saves the caption text for the last downloaded file to a .txt file
+     * in the client-specific directory.
+     *
+     * @param captionText the caption content to save; empty string if none
+     */
     private void saveCaptionFile(String captionText) {
         if (lastDownloadFileName == null) {
             System.out.println("Warning: no filename recorded for caption; skipping save.");
