@@ -59,8 +59,8 @@ public class CommandHandler {
         System.out.println("   Example:         signup john:pass123\n");
         System.out.println("2. login:           Format -> login username:password");
         System.out.println("   Example:         login john:pass123\n");
-        System.out.println("3. upload:          Format -> upload photoTitle:<filename> <caption>");
-        System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset>\n");
+        System.out.println("3. upload:          Format -> upload photoTitle:<filename> <captionEn> [<captionGr>]");
+        System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset> <Ένα όμορφο ηλιοβασίλεμα>\n");
         System.out.println("4. download:        Format -> download ownerName:filename");
         System.out.println("   Example:         download alice:beach.jpg\n");
         System.out.println("5. search:          Format -> search <photoTitle>");
@@ -186,45 +186,57 @@ public class CommandHandler {
     }
 
     /**
-     * Processes the 'upload' command by validating the payload format,
-     * reading the specified file from the local directory, encoding its data,
-     * and sending an upload message to the server.
+     * Parses and sends an UPLOAD message with one or two captions.
      *
-     * @param payload  the raw command payload (title, filename, and caption)
-     * @param clientId the ID of the client performing the upload
+     * @param payload  the raw string after the word "upload"
+     * @param clientId this client’s identifier
      */
     private void processUploadCommand(String payload, String clientId) {
-        Pattern pattern = Pattern.compile("^([^:]+):(\\S+)\\s+<(.+)>$");
+        // Now allow optional second <captionGr>
+        Pattern pattern = Pattern.compile(
+                "^([^:]+):(\\S+)\\s+<([^>]+)>(?:\\s+<([^>]+)>)?$"
+        );
         Matcher matcher = pattern.matcher(payload);
-        if (matcher.find()) {
-            String photoTitle = matcher.group(1).trim();
-            String fileName   = matcher.group(2).trim();
-            String caption    = matcher.group(3).trim();
-
-            // Build per-user path
-            String localDir = Constants.GROUP_ID + "client" + clientId;
-            Path clientFilePath = Paths.get("ClientFiles", localDir, fileName);
-
-            if (!Files.exists(clientFilePath)) {
-                System.out.println("Upload Error: Unable to read file '" + fileName
-                        + "'. Ensure it exists in ClientFiles/" + localDir);
-                return;
-            }
-
-            try {
-                byte[] fileData       = Files.readAllBytes(clientFilePath);
-                String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
-                String newPayload     = "photoTitle:" + photoTitle +
-                        "|fileName:"  + fileName +
-                        "|caption:"   + caption +
-                        "|data:"      + fileDataBase64;
-                connection.sendMessage(new Message(MessageType.UPLOAD, clientId, newPayload));
-            } catch (IOException e) {
-                System.out.println("Upload Error: I/O problem reading '" + fileName + "': " + e.getMessage());
-            }
-        } else {
+        if (!matcher.find()) {
             System.out.println("Upload command format invalid.");
-            System.out.println("Usage: upload <photoTitle>:<fileName> <caption>");
+            System.out.println("Usage: upload photoTitle:<fileName> <captionEn> [<captionGr>]");
+            return;
+        }
+
+        String photoTitle = matcher.group(1).trim();
+        String fileName   = matcher.group(2).trim();
+        String captionEn  = matcher.group(3).trim();
+        String captionGr  = matcher.group(4) != null
+                ? matcher.group(4).trim()
+                : "";   // empty if none provided
+
+        // Build per-user path
+        String localDir = Constants.GROUP_ID + "client" + clientId;
+        Path clientFilePath = Paths.get("ClientFiles", localDir, fileName);
+
+        if (!Files.exists(clientFilePath)) {
+            System.out.println("Upload Error: Unable to read file '" + fileName
+                    + "'. Ensure it exists in ClientFiles/" + localDir);
+            return;
+        }
+
+        try {
+            byte[] fileData       = Files.readAllBytes(clientFilePath);
+            String fileDataBase64 = Base64.getEncoder().encodeToString(fileData);
+
+            // include both captions in payload
+            String newPayload = "photoTitle:" + photoTitle +
+                    "|fileName:"   + fileName +
+                    "|captionEn:"  + captionEn +
+                    "|captionGr:"  + captionGr +
+                    "|data:"       + fileDataBase64;
+
+            connection.sendMessage(
+                    new Message(MessageType.UPLOAD, clientId, newPayload)
+            );
+        } catch (IOException e) {
+            System.out.println("Upload Error: I/O problem reading '"
+                    + fileName + "': " + e.getMessage());
         }
     }
 }
