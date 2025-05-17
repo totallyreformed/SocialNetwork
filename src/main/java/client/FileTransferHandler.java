@@ -3,12 +3,15 @@ package client;
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
+import common.Util;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -37,7 +40,7 @@ public class FileTransferHandler {
     /**
      * Initiates a file download by resetting state and setting the target file name.
      *
-     * @param payload    the download command payload in the format ownerName:filename
+     * @param payload    the download command payload in the format "lang:<en|gr>|ownerFilename:<user>:<file>"
      * @param connection the ServerConnection to use for receiving chunks
      */
     public static void downloadFile(String payload, ServerConnection connection) {
@@ -47,9 +50,15 @@ public class FileTransferHandler {
         chunk3Delayed = false;
         chunk6Delayed = false;
 
-        currentDownloadFile = payload.contains(":")
-                ? payload.split(":", 2)[1]
-                : payload;
+        // Parse language & ownerFilename
+        Map<String, String> map = Util.parsePayload(payload);
+        String of = map.get("ownerFilename");               // "makis:screenshot.png"
+        if (of != null && of.contains(":")) {
+            currentDownloadFile = of.split(":", 2)[1];
+        } else {
+            currentDownloadFile = payload;
+        }
+
         System.out.println("Download initiated for payload: " + payload);
     }
 
@@ -108,6 +117,27 @@ public class FileTransferHandler {
                     if (!seenChunks.contains(chunkNum)) {
                         downloadBuffer.append(chunkContent);
                         seenChunks.add(chunkNum);
+                    }
+                    break;
+
+                case DIAGNOSTIC:
+                    // Could be caption or status
+                    String msgText = msg.getPayload();
+                    if (msgText.startsWith("Caption: ")) {
+                        // save caption to same directory
+                        String cap = msgText.substring("Caption: ".length());
+                        String clientId = conn.getClientId();
+                        File dir = new File("ClientFiles/" + Constants.GROUP_ID + "client" + clientId);
+                        if (!dir.exists()) dir.mkdirs();
+                        File captionFile = new File(dir, currentDownloadFile + ".txt");
+                        try (FileOutputStream fos = new FileOutputStream(captionFile)) {
+                            fos.write(cap.getBytes());
+                        } catch (FileNotFoundException e) {
+                            throw new RuntimeException(e);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                        System.out.println("FileTransferHandler: Caption saved to " + captionFile.getPath());
                     }
                     break;
 

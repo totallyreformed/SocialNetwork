@@ -2,6 +2,8 @@ package common;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Utility class providing common helper methods for the application,
@@ -22,5 +24,21 @@ public class Util {
      */
     public static String getTimestamp() {
         return LocalDateTime.now().format(formatter);
+    }
+
+    /**
+     * Parses a payload of the form "key1:val1|key2:val2|…" into a map.
+     */
+    public static Map<String, String> parsePayload(String payload) {
+        Map<String,String> map = new HashMap<>();
+        for (String part : payload.split("\\|")) {
+            int idx = part.indexOf(':');
+            if (idx > 0) {
+                String key = part.substring(0, idx);
+                String val = part.substring(idx + 1);
+                map.put(key, val);
+            }
+        }
+        return map;
     }
 }

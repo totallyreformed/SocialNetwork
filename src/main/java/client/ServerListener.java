@@ -76,23 +76,36 @@ public class ServerListener implements Runnable {
                 // Handle diagnostic messages (search, captions, repost sync, notifications)
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
+
+                    // New search handling:
                     if (p.startsWith("Search: found photo ")) {
-                        // Process search result and initiate download
                         System.out.println(p);
                         String[] parts = p.split(" at: ");
                         if (parts.length == 2) {
-                            String file = parts[0].substring("Search: found photo ".length());
+                            // filename without the " (en)" suffix
+                            String raw = parts[0].substring("Search: found photo ".length());
+                            int idx = raw.indexOf(" (");
+                            String file = (idx == -1 ? raw : raw.substring(0, idx)).trim();
+
+                            // pick a random "id(username)" token
                             String[] owners = parts[1].split(",");
                             int ri = new java.util.Random().nextInt(owners.length);
-                            String chosenToken = owners[ri];
-                            String ownerName = chosenToken.substring(
-                                    chosenToken.indexOf('(') + 1,
-                                    chosenToken.indexOf(')')
+                            String token = owners[ri].trim();          // e.g. "2(makis)"
+
+                            // NEW: extract the username between '(' and ')'
+                            String ownerName = token.substring(
+                                    token.indexOf('(') + 1,
+                                    token.indexOf(')')
                             );
-                            System.out.println("Initiating download of " + file
-                                    + " from user " + ownerName);
+
+                            System.out.println("Initiating download of " + file + " from user " + ownerName);
                             lastDownloadFileName = file;
-                            String downloadPayload = ownerName + ":" + file;
+
+                            // build payload with username, not numeric ID
+                            String lang = connection.getLanguagePref();
+                            String downloadPayload = "lang:" + lang
+                                    + "|ownerFilename:" + ownerName + ":" + file;
+
                             connection.sendMessage(new Message(
                                     MessageType.DOWNLOAD,
                                     connection.getClientId(),

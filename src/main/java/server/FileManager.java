@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -154,17 +155,22 @@ public class FileManager {
     }
 
     /**
-     * Processes a search request for photos by title or filename, filters results
-     * to the client's followees, and returns a diagnostic message listing matches.
+     * Processes a search request carrying both preferred language and query,
+     * filters results to the client’s followees, and returns a diagnostic message listing matches.
      *
-     * @param msg      the search Message containing the query
+     * @param msg      the search Message containing "lang:<en|gr>|query:<photoTitle>"
      * @param clientId the numeric ID of the searching client
      * @param output   the ObjectOutputStream to send the search result
      */
     public static void handleSearch(Message msg,
                                     String clientId,
                                     ObjectOutputStream output) {
-        String query    = msg.getPayload().trim();
+        // 1) Parse the combined payload into a map
+        Map<String, String> map = Util.parsePayload(msg.getPayload());
+        String lang  = map.getOrDefault("lang", "en");   // capture language, default to English
+        String query = map.getOrDefault("query", "").trim();
+
+        // 2) Lowercase key lookup
         String key      = query.toLowerCase();
         String fileName = titleToFileName.get(key);
 
@@ -178,22 +184,24 @@ public class FileManager {
             owners   = photoOwners.getOrDefault(fileName, Set.of());
         }
 
-        // Filter to only followees
+        // 3) Filter to only followees
         Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
         Set<String> available = owners.stream()
                 .filter(followees::contains)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
+        // 4) Build result message
         String result;
         if (available.isEmpty()) {
-            result = "Search: no followees have photo " + query;
+            result = "Search: no followees have photo " + query + " (" + lang + ")";
         } else {
             String listing = available.stream()
                     .map(id -> id + "(" + AuthenticationManager.getUsernameByNumericId(id) + ")")
                     .collect(Collectors.joining(","));
-            result = "Search: found photo " + fileName + " at: " + listing;
+            result = "Search: found photo " + fileName + " (" + lang + ") at: " + listing;
         }
 
+        // 5) Send back as DIAGNOSTIC
         try {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", result));
             output.flush();
@@ -221,9 +229,12 @@ public class FileManager {
         System.out.println(Util.getTimestamp() + " FileManager: Processing DOWNLOAD for client " + downloaderId);
 
         // 1) Parse ownerName:photoName
-        String[] parts = msg.getPayload().split(":", 2);
-        String ownerName = parts.length == 2 ? parts[0] : AuthenticationManager.getUsernameByNumericId(downloaderId);
-        String photoName = parts.length == 2 ? parts[1] : msg.getPayload();
+        Map<String,String> map = Util.parsePayload(msg.getPayload());
+        String lang       = map.get("lang");                  // "en" or "gr"
+        String of         = map.get("ownerFilename");         // e.g. "makis:screenshot.png"
+        String[] parts    = of.split(":", 2);
+        String ownerName  = parts[0];
+        String photoName  = parts[1];
 
         // 2) Resolve ownerName → ownerId
         String ownerId = AuthenticationManager.getClientIdByUsername(ownerName);
@@ -234,16 +245,13 @@ public class FileManager {
             return;
         }
 
-        // 3) Locate files
-        File ownerDir    = new File("ServerFiles/" + Constants.GROUP_ID + "client" + ownerId);
-        File photoFile   = new File(ownerDir, photoName);
-        File captionFile = new File(ownerDir, photoName + ".txt");
-
+        // 3) Locate photo file
+        File ownerDir  = new File("ServerFiles/" + Constants.GROUP_ID + "client" + ownerId);
+        File photoFile = new File(ownerDir, photoName);
         if (!photoFile.exists()) {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                     "File " + photoName + " not found."));
             output.flush();
-            System.out.println(Util.getTimestamp() + " FileManager: DOWNLOAD aborted – file not found.");
             return;
         }
 
@@ -340,14 +348,15 @@ public class FileManager {
                 // if there’s a delayed second ACK for the same chunk, it will be read by the next iteration’s rawIn.available() but ignored
             }
 
-            // 7) Send caption or notify none
-            if (captionFile.exists()) {
-                String cap = new String(Files.readAllBytes(captionFile.toPath()));
+            // 7) Send language-specific caption
+            File capFile = new File(ownerDir, photoName + "_" + lang + ".txt");
+            if (capFile.exists()) {
+                String cap = new String(Files.readAllBytes(capFile.toPath()));
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
                         "Caption: " + cap));
             } else {
                 output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server",
-                        "No caption available"));
+                        "No caption available in " + (lang.equals("en") ? "English" : "Greek")));
             }
             output.flush();
 

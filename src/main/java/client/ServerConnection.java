@@ -17,6 +17,9 @@ public class ServerConnection {
     // Use a default placeholder; this will be updated silently when auth succeeds.
     private String clientId = "clientID_placeholder";
 
+    // NEW: store the user's language preference (default to English)
+    private String languagePref = "en";
+
     /**
      * Establishes a socket connection to the server and starts
      * a listener thread for incoming messages.
@@ -71,5 +74,23 @@ public class ServerConnection {
     public void setClientId(String clientId) {
         this.clientId = clientId;
         // Suppressed: Do not print internal session update details.
+    }
+
+    /**
+     * Retrieves the client’s preferred language for captions ("en" or "gr").
+     *
+     * @return the current language preference
+     */
+    public String getLanguagePref() {
+        return languagePref;
+    }
+
+    /**
+     * Updates the client’s language preference.
+     *
+     * @param languagePref must be "en" or "gr"
+     */
+    public void setLanguagePref(String languagePref) {
+        this.languagePref = languagePref;
     }
 }

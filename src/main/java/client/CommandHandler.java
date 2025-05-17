@@ -24,6 +24,11 @@ public class CommandHandler {
     private ServerConnection connection;
 
     /**
+     * The client’s preferred caption language ("en" or "gr").
+     */
+    private String languagePref;   // NEW
+
+    /**
      * Constructs a CommandHandler with the given server connection.
      *
      * @param connection the ServerConnection to use for communication
@@ -37,6 +42,7 @@ public class CommandHandler {
      * reading user input, and dispatching commands until 'exit' is entered.
      */
     public void start() {
+        loadLanguagePref();        // NEW
         printCommandList();
         Scanner scanner = new Scanner(System.in);
         while (true) {
@@ -59,27 +65,29 @@ public class CommandHandler {
         System.out.println("   Example:         signup john:pass123\n");
         System.out.println("2. login:           Format -> login username:password");
         System.out.println("   Example:         login john:pass123\n");
-        System.out.println("3. upload:          Format -> upload photoTitle:<filename> <captionEn> [<captionGr>]");
+        System.out.println("3. setlang:         Format -> setlang en|gr");
+        System.out.println("   Example:         setlang gr\n");
+        System.out.println("4. upload:          Format -> upload photoTitle:<filename> <captionEn> [<captionGr>]");
         System.out.println("   Example:         upload photoName:image.jpg <A beautiful sunset> <Ένα όμορφο ηλιοβασίλεμα>\n");
-        System.out.println("4. download:        Format -> download ownerName:filename");
+        System.out.println("5. download:        Format -> download ownerName:filename");
         System.out.println("   Example:         download alice:beach.jpg\n");
-        System.out.println("5. search:          Format -> search <photoTitle>");
+        System.out.println("6. search:          Format -> search <photoTitle>");
         System.out.println("   Example:         search Acropolis\n");
-        System.out.println("6. follow:          Format -> follow <target_username>");
+        System.out.println("7. follow:          Format -> follow <target_username>");
         System.out.println("   Example:         follow alice\n");
-        System.out.println("7. unfollow:        Format -> unfollow <target_username>");
+        System.out.println("8. unfollow:        Format -> unfollow <target_username>");
         System.out.println("   Example:         unfollow alice\n");
-        System.out.println("8. respondfollow:   Format -> respondfollow <requester_username>:<decision>");
+        System.out.println("9. respondfollow:   Format -> respondfollow <requester_username>:<decision>");
         System.out.println("   Example:         respondfollow alice:reciprocate\n");
-        System.out.println("9. access_profile:  Format -> access_profile <target_username>");
+        System.out.println("10. access_profile:  Format -> access_profile <target_username>");
         System.out.println("   Example:         access_profile alice\n");
-        System.out.println("10. repost:         Format -> repost <target_username>:<postId>");
+        System.out.println("11. repost:         Format -> repost <target_username>:<postId>");
         System.out.println("   Example:         repost alice:3\n");
-        System.out.println("11. comment:        Format -> comment <target_username>:<postId>:<comment text>");
+        System.out.println("12. comment:        Format -> comment <target_username>:<postId>:<comment text>");
         System.out.println("   Example:         comment alice:3:Nice shot!\n");
-        System.out.println("12. list_followers: Format -> list_followers");
+        System.out.println("13. list_followers: Format -> list_followers");
         System.out.println("   Lists users who follow you\n");
-        System.out.println("13. list_following: Format -> list_following");
+        System.out.println("14. list_following: Format -> list_following");
         System.out.println("   Lists users you are following\n");
         System.out.println("Type 'exit' to quit.");
         System.out.println("======================================");
@@ -112,21 +120,29 @@ public class CommandHandler {
                 connection.sendMessage(new Message(MessageType.LOGIN, connection.getClientId(), payload));
                 break;
 
+            case "setlang":    // NEW
+                processSetLang(payload);
+                break;
+
             case "upload":
                 processUploadCommand(payload, connection.getClientId());
                 break;
 
             case "download":
                 if (payload.contains(":")) {
-                    connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), payload));
-                    FileTransferHandler.downloadFile(payload, connection);
+                    // Include language preference
+                    String combined = "lang:" + languagePref + "|ownerFilename:" + payload;
+                    connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), combined));
+                    FileTransferHandler.downloadFile(combined, connection);
                 } else {
                     System.out.println("Download command format invalid. Usage: download ownerName:filename");
                 }
                 break;
 
             case "search":
-                connection.sendMessage(new Message(MessageType.SEARCH, connection.getClientId(), payload));
+                // MODIFIED to include language preference
+                String combined = "lang:" + languagePref + "|query:" + payload;
+                connection.sendMessage(new Message(MessageType.SEARCH, connection.getClientId(), combined));
                 break;
 
             case "follow":
@@ -239,4 +255,47 @@ public class CommandHandler {
                     + fileName + "': " + e.getMessage());
         }
     }
+
+    // ────── NEW METHODS ──────
+
+    /**
+     * Loads the saved language preference from disk or defaults to English.
+     */
+    private void loadLanguagePref() {
+        Path prefs = Paths.get("ClientFiles", "prefs_" + connection.getClientId() + ".txt");
+        try {
+            if (Files.exists(prefs)) {
+                this.languagePref = new String(Files.readAllBytes(prefs)).trim();
+            } else {
+                this.languagePref = "en";
+            }
+        } catch (IOException e) {
+            System.err.println("Could not read language prefs: " + e.getMessage());
+            this.languagePref = "en";
+        }
+    }
+
+    /**
+     * Handles the setlang command, validating and persisting the preference.
+     *
+     * @param payload should be "en" or "gr"
+     */
+    private void processSetLang(String payload) {
+        String lang = payload.toLowerCase();
+        if (!lang.equals("en") && !lang.equals("gr")) {
+            System.out.println("Usage: setlang en|gr");
+            return;
+        }
+        this.languagePref = lang;
+        connection.setLanguagePref(lang);
+        try {
+            Path prefs = Paths.get("ClientFiles", "prefs_" + connection.getClientId() + ".txt");
+            Files.write(prefs, lang.getBytes());
+            System.out.println("Language set to " +
+                    (lang.equals("en") ? "English" : "Greek"));
+        } catch (IOException e) {
+            System.err.println("Failed to save language preference: " + e.getMessage());
+        }
+    }
+
 }
