@@ -157,6 +157,7 @@ public class FileManager {
     /**
      * Processes a search request carrying both preferred language and query,
      * filters results to the client’s followees, and returns a diagnostic message listing matches.
+     * Now also filters owners by existence of the requested-language caption file.
      *
      * @param msg      the search Message containing "lang:<en|gr>|query:<photoTitle>"
      * @param clientId the numeric ID of the searching client
@@ -165,32 +166,41 @@ public class FileManager {
     public static void handleSearch(Message msg,
                                     String clientId,
                                     ObjectOutputStream output) {
-        // 1) Parse the combined payload into a map
+        // 1) Parse payload
         Map<String, String> map = Util.parsePayload(msg.getPayload());
-        String lang  = map.getOrDefault("lang", "en");   // capture language, default to English
+        String lang  = map.getOrDefault("lang", "en");
         String query = map.getOrDefault("query", "").trim();
 
-        // 2) Lowercase key lookup
+        // 2) Determine file name and candidate owners
         String key      = query.toLowerCase();
         String fileName = titleToFileName.get(key);
-
         Set<String> owners;
         if (fileName != null) {
-            // title match
             owners = titleOwners.getOrDefault(key, Set.of());
         } else {
-            // fallback: interpret query as a filename
             fileName = query;
             owners   = photoOwners.getOrDefault(fileName, Set.of());
         }
 
-        // 3) Filter to only followees
+        // 3) Filter by followees
         Set<String> followees = SocialGraphManager.getInstance().getFollowees(clientId);
         Set<String> available = owners.stream()
                 .filter(followees::contains)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        // 4) Build result message
+        // 4) Further filter by existence of caption in requested language
+        String finalFileName = fileName;
+        available = available.stream()
+                .filter(ownerId -> {
+                    // caption file: ServerFiles/<group>client<ownerId>/<fileName>_<lang>.txt
+                    Path cap = Paths.get("ServerFiles",
+                            Constants.GROUP_ID + "client" + ownerId,
+                            finalFileName + "_" + lang + ".txt");
+                    return Files.exists(cap);
+                })
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        // 5) Build result
         String result;
         if (available.isEmpty()) {
             result = "Search: no followees have photo " + query + " (" + lang + ")";
@@ -201,7 +211,7 @@ public class FileManager {
             result = "Search: found photo " + fileName + " (" + lang + ") at: " + listing;
         }
 
-        // 5) Send back as DIAGNOSTIC
+        // 6) Send back
         try {
             output.writeObject(new Message(MessageType.DIAGNOSTIC, "Server", result));
             output.flush();
