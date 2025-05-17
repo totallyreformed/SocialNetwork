@@ -51,78 +51,69 @@ public class FileManager {
     public static void handleUpload(Message msg, String clientId, ObjectOutputStream output) {
         System.out.println(Util.getTimestamp() + " FileManager: Processing UPLOAD from client " + clientId);
 
-        // Parse payload parts
-        String payload = msg.getPayload();
-        String[] parts = payload.split("\\|");
-        String photoTitle = "", fileName = "", caption = "", base64Data = "";
+        // --- 1) Parse payload parts ---
+        String payload     = msg.getPayload();
+        String[] parts     = payload.split("\\|");
+        String photoTitle  = "", fileName = "", captionEn = "", captionGr = "", base64Data = "";
+
         for (String part : parts) {
-            if (part.startsWith("photoTitle:"))
+            if (part.startsWith("photoTitle:")) {
                 photoTitle = part.substring("photoTitle:".length());
-            else if (part.startsWith("fileName:"))
+            } else if (part.startsWith("fileName:")) {
                 fileName = part.substring("fileName:".length());
-            else if (part.startsWith("caption:"))
-                caption = part.substring("caption:".length());
-            else if (part.startsWith("data:"))
+            } else if (part.startsWith("captionEn:")) {
+                captionEn = part.substring("captionEn:".length());
+            } else if (part.startsWith("captionGr:")) {
+                captionGr = part.substring("captionGr:".length());
+            } else if (part.startsWith("data:")) {
                 base64Data = part.substring("data:".length());
+            }
         }
 
         try {
-            // Ensure server sub-directory exists
-            File dir = new File("ServerFiles/" + Constants.GROUP_ID + "client" + clientId);
-            if (!dir.exists()) {
-                dir.mkdirs();
-                System.out.println(Util.getTimestamp() + " FileManager: Created directory " + dir.getPath());
-            }
+            // Decode the image bytes
+            byte[] fileBytes = Base64.getDecoder().decode(base64Data);
 
-            // Determine file bytes: from Base64 or client folder
-            byte[] fileBytes;
-            if (!base64Data.isEmpty()) {
-                fileBytes = Base64.getDecoder().decode(base64Data);
-            } else {
-                Path clientPath = Paths.get("ClientFiles",
-                        Constants.GROUP_ID + "client" + clientId,
-                        fileName);
-                fileBytes = Files.readAllBytes(clientPath);
-            }
+            // Server directory for this client
+            Path dir = Paths.get("ServerFiles", Constants.GROUP_ID + "client" + clientId);
+            Files.createDirectories(dir);
 
-            // Save photo file on server
-            File photoFile = new File(dir, fileName);
+            // --- 2) Save the photo file ---
+            File photoFile = new File(dir.toFile(), fileName);
             try (FileOutputStream fos = new FileOutputStream(photoFile)) {
                 fos.write(fileBytes);
             }
             System.out.println(Util.getTimestamp() + " FileManager: Saved photo file " + fileName);
-            // Mark this file so DirectoryWatcher will skip re-syncing it
             SyncRegistry.markEvent(photoFile.toPath());
 
-            // Record ownership for filename-based search
+            // --- 3) Update search indices ---
+            // by filename
             photoOwners
                     .computeIfAbsent(fileName, k -> ConcurrentHashMap.newKeySet())
                     .add(clientId);
-
-            // Record ownership for title-based search (case-insensitive)
+            // by title
             String key = photoTitle.trim().toLowerCase();
             titleOwners
                     .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet())
                     .add(clientId);
             titleToFileName.putIfAbsent(key, fileName);
 
-            // Determine caption text and save on server
-            String captionText = caption;
-            if (captionText.isEmpty()) {
-                Path clientCaption = Paths.get("ClientFiles",
-                        Constants.GROUP_ID + "client" + clientId,
-                        fileName + ".txt");
-                if (Files.exists(clientCaption)) {
-                    captionText = new String(Files.readAllBytes(clientCaption));
+            // --- 4) Save bilingual captions ---
+            // Always write the English caption (even if empty, to clear old data)
+            File capEnFile = new File(dir.toFile(), fileName + "_en.txt");
+            try (FileOutputStream fos = new FileOutputStream(capEnFile)) {
+                fos.write(captionEn.getBytes());
+            }
+            System.out.println(Util.getTimestamp() + " FileManager: Saved English caption for " + fileName);
+
+            // Only write a Greek caption file if one was provided
+            if (!captionGr.isEmpty()) {
+                File capGrFile = new File(dir.toFile(), fileName + "_gr.txt");
+                try (FileOutputStream fos = new FileOutputStream(capGrFile)) {
+                    fos.write(captionGr.getBytes());
                 }
+                System.out.println(Util.getTimestamp() + " FileManager: Saved Greek caption for " + fileName);
             }
-            File captionFile = new File(dir, fileName + ".txt");
-            try (FileOutputStream fos = new FileOutputStream(captionFile)) {
-                fos.write(captionText.getBytes());
-            }
-            System.out.println(Util.getTimestamp() + " FileManager: Saved caption for " + fileName);
-            // Mark this file so DirectoryWatcher will skip re-syncing it
-            SyncRegistry.markEvent(captionFile.toPath());
 
             // Notify followers of new upload
             ProfileManager.getInstance().updateProfile(clientId, photoTitle);
@@ -147,7 +138,7 @@ public class FileManager {
                 }
             }
 
-            // Acknowledge successful upload
+            // Acknowledge upload
             output.writeObject(new Message(
                     MessageType.DIAGNOSTIC,
                     "Server",
