@@ -26,7 +26,9 @@ public class Message implements Serializable {
         AUTH_SUCCESS, AUTH_FAILURE,
         REPOST, COMMENT,
         // Phase B gated download flow
-        ASK, PERMIT, DENY
+        ASK, PERMIT, DENY,
+        // Phase B comment approval handshake
+        ASK_COMMENT, APPROVE_COMMENT, DENY_COMMENT
     }
 
     /** Type of this message. */

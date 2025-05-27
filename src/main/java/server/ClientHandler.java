@@ -260,28 +260,42 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
-            case COMMENT:
-                // Expected payload: "target_username:postId:commentText"
-                String[] commentParts = msg.getPayload().split(":", 3);
-                if (commentParts.length == 3) {
-                    String targetUsername = commentParts[0];
-                    String postId         = commentParts[1];
-                    String commentText    = commentParts[2];
-                    String targetNumericId = AuthenticationManager.getClientIdByUsername(targetUsername);
-                    if (targetNumericId != null) {
-                        // Queue the comment (ProfileManager will add notification)
-                        ProfileManager.getInstance().addCommentToPost(targetNumericId, postId, clientId, commentText);
-                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
-                                "Comment added to post " + postId + " of user " + targetUsername));
-                    } else {
-                        sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
-                                "Comment failed: User '" + targetUsername + "' not found."));
-                    }
+            case ASK_COMMENT: {
+                Map<String,String> m=Util.parsePayload(msg.getPayload());
+                String ownerUser=m.get("ownerUsername");
+                String ownerId=AuthenticationManager.getClientIdByUsername(ownerUser);
+                if(ownerId==null||!activeClients.containsKey(ownerId)){
+                    sendExternalTo(msg.getSenderId(), new Message(
+                            MessageType.DENY_COMMENT,"Server",
+                            "User '"+ownerUser+"' not available"));
                 } else {
-                    sendMessage(new Message(MessageType.DIAGNOSTIC, "Server",
-                            "Comment failed: Invalid format. Use target_username:postId:comment text"));
+                    activeClients.get(ownerId).sendExternalMessage(
+                            new Message(MessageType.ASK_COMMENT,
+                                    msg.getSenderId(),
+                                    msg.getPayload()));
                 }
                 break;
+            }
+            case APPROVE_COMMENT:
+            case DENY_COMMENT: {
+                Map<String,String> m=Util.parsePayload(msg.getPayload());
+                String rid=m.get("requesterId");
+                ClientHandler ch=activeClients.get(rid);
+                if(ch!=null) ch.sendExternalMessage(msg);
+                break;
+            }
+            case COMMENT: {
+                Map<String,String> m=Util.parsePayload(msg.getPayload());
+                String ownerUser=m.get("ownerUsername"),
+                        postId=m.get("postId"),
+                        text=m.get("commentText");
+                String ownerId=AuthenticationManager.getClientIdByUsername(ownerUser);
+                if(ownerId!=null){
+                    ProfileManager.getInstance()
+                            .addCommentToPost(ownerId, postId, msg.getSenderId(), text);
+                }
+                break;
+            }
 
             case FOLLOW_RESPONSE:
                 SocialGraphManager.getInstance().handleFollowResponse(msg);

@@ -43,7 +43,7 @@ public class CommandHandler {
      * reading user input, and dispatching commands until 'exit' is entered.
      */
     public void start() {
-        loadLanguagePref();        // NEW
+        loadLanguagePref();
         printCommandList();
         Scanner scanner = new Scanner(System.in);
         while (true) {
@@ -51,15 +51,19 @@ public class CommandHandler {
             String input = scanner.nextLine().trim();
             if (input.equalsIgnoreCase("exit")) break;
 
-            // NEW: if there's an ASK pending, handle it before normal commands
+            // download ask/permit/deny
             if (connection.hasPendingAsk()) {
                 handleAskResponse(input);
                 continue;
             }
-
-            // NEW: if we're in retry-on-denial state, handle retry flow
             if (connection.getRetryState() != ServerConnection.RetryState.NONE) {
                 handleRetryFlow(input);
+                continue;
+            }
+
+            // comment ask/approve/deny
+            if (connection.hasPendingCommentAsk()) {
+                handleCommentAskResponse(input);
                 continue;
             }
 
@@ -174,6 +178,22 @@ public class CommandHandler {
                 connection.getClientId(),
                 askPayload));
         System.out.println("Retrying download of '" + file + "' from user " + owner);
+    }
+
+    private void handleCommentAskResponse(String response) {
+        String resp = response.toLowerCase();
+        if (!resp.equals("yes") && !resp.equals("no")) {
+            System.out.println("Please type 'yes' or 'no'.");
+            return;
+        }
+        String askPayload = connection.consumePendingCommentAsk();
+        MessageType reply = resp.equals("yes")
+                ? MessageType.APPROVE_COMMENT
+                : MessageType.DENY_COMMENT;
+        connection.sendMessage(new Message(reply,
+                connection.getClientId(), askPayload));
+        System.out.println("You chose to " + (reply == MessageType.APPROVE_COMMENT ?
+                "approve" : "deny") + " the comment request.");
     }
 
     /**
@@ -323,11 +343,17 @@ public class CommandHandler {
                 break;
 
             case "comment":
-                String[] commentTokens = payload.split(":", 3);
-                if (commentTokens.length == 3) {
-                    connection.sendMessage(new Message(MessageType.COMMENT, connection.getClientId(), payload));
+                String[] ct = payload.split(":",3);
+                if (ct.length==3) {
+                    String askPayload = "requesterId:" + connection.getClientId()
+                            + "|ownerUsername:" + ct[0]
+                            + "|postId:" + ct[1]
+                            + "|commentText:" + ct[2];
+                    connection.sendMessage(new Message(MessageType.ASK_COMMENT,
+                            connection.getClientId(), askPayload));
+                    System.out.println("Sent comment-request to " + ct[0]);
                 } else {
-                    System.out.println("Comment command format invalid. Usage: comment <target_username>:<postId>:<comment text>");
+                    System.out.println("Usage: comment <user>:<postId>:<text>");
                 }
                 break;
 
