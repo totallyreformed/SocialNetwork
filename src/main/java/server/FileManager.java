@@ -325,47 +325,44 @@ public class FileManager {
             // 7) Go-Back-N window = 3, cumulative ACKs
             int base = 1, nextSeq = 1;
             final int N = numChunks, WINDOW = 3;
-            Map<Integer, Long> sendTimes = new HashMap<>();
 
             while (base <= N) {
-                // send up to window
+
+                /* --- send window --- */
                 while (nextSeq < base + WINDOW && nextSeq <= N) {
                     output.writeObject(chunks.get(nextSeq - 1));
                     output.flush();
-                    sendTimes.put(nextSeq, System.currentTimeMillis());
                     System.out.println(Util.getTimestamp()
                             + " FileManager: Sent chunk " + nextSeq);
                     nextSeq++;
                 }
 
-                // wait for ACK or timeout on base
-                boolean gotAck = false;
-                long timeoutStart = System.currentTimeMillis();
-                while (System.currentTimeMillis() - timeoutStart < Constants.TIMEOUT_MILLISECONDS) {
+                /* --- wait up to TIMEOUT_MILLISECONDS, collect ALL ACKs --- */
+                long startWait = System.currentTimeMillis();
+                int highestAck = -1;                                 // store highest cumulative ACK seen
+                while (System.currentTimeMillis() - startWait < Constants.TIMEOUT_MILLISECONDS) {
                     if (rawIn.available() > 0) {
                         Message resp = (Message) input.readObject();
-                        if (resp.getType() == MessageType.ACK && resp.getPayload().contains("Chunk ")) {
-                            // parse cumulative ack number
-                            String payload = resp.getPayload();
+                        if (resp.getType() == MessageType.ACK &&
+                                resp.getPayload().contains("Chunk ")) {
+
                             int ackNum = Integer.parseInt(
-                                    payload.split("Chunk ")[1].trim()
-                            );
-                            if (ackNum >= base) {
-                                base = ackNum + 1;
-                                gotAck = true;
-                                System.out.println(Util.getTimestamp()
-                                        + " FileManager: Cumulative ACK received for chunk " + ackNum);
-                                break;
-                            }
+                                    resp.getPayload().split("Chunk ")[1].trim());
+
+                            if (ackNum > highestAck) highestAck = ackNum;
                         }
-                        // ignore others
                     }
                 }
 
-                if (!gotAck) {
-                    // timeout → go back and retransmit [base, nextSeq)
+                if (highestAck >= base) {
+                    base = highestAck + 1;                           // slide window
                     System.out.println(Util.getTimestamp()
-                            + " FileManager: Timeout on chunk " + base + ", retransmitting window");
+                            + " FileManager: Cumulative ACK received for chunk " + highestAck);
+                } else {
+                    /* --- timeout : retransmit window [base .. nextSeq-1] --- */
+                    System.out.println(Util.getTimestamp()
+                            + " FileManager: Timeout on chunk " + base
+                            + ", retransmitting window");
                     for (int seq = base; seq < nextSeq; seq++) {
                         output.writeObject(chunks.get(seq - 1));
                         output.flush();

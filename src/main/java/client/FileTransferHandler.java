@@ -70,98 +70,89 @@ public class FileTransferHandler {
      * @param conn the ServerConnection over which to send acknowledgements
      */
     public static void handleIncomingMessage(Message msg, ServerConnection conn) {
-        try {
-            switch (msg.getType()) {
+        switch (msg.getType()) {
 
-                case HANDSHAKE:
-                    // Respond to initial handshake to begin transfer
-                    conn.sendMessage(new Message(MessageType.ACK,
-                            conn.getClientId(),
-                            "handshake ACK"));
-                    break;
+            case HANDSHAKE:
+                // Respond to initial handshake to begin transfer
+                conn.sendMessage(new Message(MessageType.ACK,
+                        conn.getClientId(),
+                        "handshake ACK"));
+                break;
 
-                case FILE_CHUNK:
-                    // Split payload into chunk label and content
-                    String[] parts = msg.getPayload().split(":", 2);
-                    if (parts.length < 2) break;
-                    String chunkLabel   = parts[0].trim();   // e.g., "Chunk 3"
-                    String chunkContent = parts[1].trim();
+            case FILE_CHUNK: {
+                /* Split label & content */
+                String[] p = msg.getPayload().split(":", 2);
+                if (p.length < 2) break;
+                int chunkNum;
+                try { chunkNum = Integer.parseInt(p[0].trim().split(" ")[1]); }
+                catch (Exception e) { break; }
+                String chunkContent = p[1].trim();
 
-                    // Parse chunk number from label
-                    int chunkNum = -1;
-                    try {
-                        chunkNum = Integer.parseInt(chunkLabel.split(" ")[1]);
-                    } catch (Exception ignored) {}
+                /* ── rubric e,f,g – decide if we ACK ─────────────────────────── */
+                boolean sendAck;
+                if (chunkNum == 3) {
+                    sendAck = false;                      // never ACK 3
+                } else if (chunkNum == 4) {
+                    sendAck = true;                       // ACK 4 immediately
+                } else if (chunkNum >= 6) {
+                    // first arrival of ≥6 → no ACK, duplicate → ACK
+                    sendAck = seenChunks.contains(chunkNum);
+                } else {
+                    sendAck = true;                       // normal chunks (1,2,5) ACK immediately
+                }
+                if (sendAck) {
+                    currentConnection.sendMessage(new Message(
+                            MessageType.ACK,
+                            currentConnection.getClientId(),
+                            "ACK for Chunk " + chunkNum));
+                }
 
-                    // Simulate delayed ACKs for testing network conditions
-                    if (chunkNum == 3 && !chunk3Delayed) {
-                        Thread.sleep(3500);
-                        conn.sendMessage(new Message(MessageType.ACK,
-                                conn.getClientId(),
-                                "ACK for Chunk 3"));
-                        chunk3Delayed = true;
-                    } else if (chunkNum == 6 && !chunk6Delayed) {
-                        Thread.sleep(3500);
-                        conn.sendMessage(new Message(MessageType.ACK,
-                                conn.getClientId(),
-                                "ACK for Chunk 6"));
-                        chunk6Delayed = true;
-                    } else {
-                        // Acknowledge other chunks immediately
-                        conn.sendMessage(new Message(MessageType.ACK,
-                                conn.getClientId(),
-                                "ACK for Chunk " + chunkNum));
-                    }
-
-                    // Append content only if this chunk has not been seen before
-                    if (!seenChunks.contains(chunkNum)) {
-                        downloadBuffer.append(chunkContent);
-                        seenChunks.add(chunkNum);
-                    }
-                    break;
-
-                case DIAGNOSTIC:
-                    // Could be caption or status
-                    String msgText = msg.getPayload();
-                    if (msgText.startsWith("Caption: ")) {
-                        // save caption to same directory
-                        String cap = msgText.substring("Caption: ".length());
-                        String clientId = conn.getClientId();
-                        File dir = new File("ClientFiles/" + Constants.GROUP_ID + "client" + clientId);
-                        if (!dir.exists()) dir.mkdirs();
-                        File captionFile = new File(dir, currentDownloadFile + ".txt");
-                        try (FileOutputStream fos = new FileOutputStream(captionFile)) {
-                            fos.write(cap.getBytes());
-                        } catch (FileNotFoundException e) {
-                            throw new RuntimeException(e);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                        System.out.println("FileTransferHandler: Caption saved to " + captionFile.getPath());
-                    }
-                    break;
-
-                case FILE_END:
-                    // Complete download: output message and save file
-                    System.out.println(msg.getPayload());
-                    System.out.println("Download complete. Saving file...");
-                    saveDownloadedFile();
-                    downloadBuffer.setLength(0);
-                    currentDownloadFile = null;
-                    currentConnection = null;
-                    break;
-
-                case NACK:
-                    // Handle negative acknowledgement by logging error
-                    System.out.println("Download error: " + msg.getPayload());
-                    break;
-
-                default:
-                    // Ignore unrelated messages
-                    break;
+                /* Store data only once */
+                if (seenChunks.add(chunkNum)) {
+                    downloadBuffer.append(chunkContent);
+                }
+                break;
             }
-        } catch (InterruptedException e) {
-            System.out.println("FileTransferHandler: Interrupted: " + e.getMessage());
+
+            case DIAGNOSTIC:
+                // Could be caption or status
+                String msgText = msg.getPayload();
+                if (msgText.startsWith("Caption: ")) {
+                    // save caption to same directory
+                    String cap = msgText.substring("Caption: ".length());
+                    String clientId = conn.getClientId();
+                    File dir = new File("ClientFiles/" + Constants.GROUP_ID + "client" + clientId);
+                    if (!dir.exists()) dir.mkdirs();
+                    File captionFile = new File(dir, currentDownloadFile + ".txt");
+                    try (FileOutputStream fos = new FileOutputStream(captionFile)) {
+                        fos.write(cap.getBytes());
+                    } catch (FileNotFoundException e) {
+                        throw new RuntimeException(e);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    System.out.println("FileTransferHandler: Caption saved to " + captionFile.getPath());
+                }
+                break;
+
+            case FILE_END:
+                // Complete download: output message and save file
+                System.out.println(msg.getPayload());
+                System.out.println("Download complete. Saving file...");
+                saveDownloadedFile();
+                downloadBuffer.setLength(0);
+                currentDownloadFile = null;
+                currentConnection = null;
+                break;
+
+            case NACK:
+                // Handle negative acknowledgement by logging error
+                System.out.println("Download error: " + msg.getPayload());
+                break;
+
+            default:
+                // Ignore unrelated messages
+                break;
         }
     }
 
