@@ -4,10 +4,12 @@ import java.net.Socket;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import common.Message;
 import common.Message.MessageType;
+import common.Util;
 
 /**
  * Handles communication with a connected client, processing incoming messages
@@ -166,6 +168,46 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
+            /* ========== Phase-B ASK/PERMIT/DENY ========== */
+            case ASK: {
+                Map<String,String> m = Util.parsePayload(msg.getPayload());
+                String ownerUsername = m.get("ownerUsername");
+                String ownerId = AuthenticationManager.getClientIdByUsername(ownerUsername);
+
+                if (ownerId == null) {                // no such user
+                    sendExternalTo(msg.getSenderId(), new Message(
+                            MessageType.DENY, "Server",
+                            "User '" + ownerUsername + "' not found"));
+                    return;
+                }
+                ClientHandler ownerHandler = activeClients.get(ownerId);
+                if (ownerHandler == null) {           // owner offline
+                    sendExternalTo(msg.getSenderId(), new Message(
+                            MessageType.DENY, "Server",
+                            "Owner '" + ownerUsername + "' is offline"));
+                    return;
+                }
+                ownerHandler.sendExternalMessage(new Message(
+                        MessageType.ASK,
+                        msg.getSenderId(),          // preserve requesterID
+                        msg.getPayload()));         // unchanged payload
+                break;
+            }
+
+            case PERMIT:
+            case DENY: {
+                Map<String,String> m = Util.parsePayload(msg.getPayload());
+                String requesterId = m.get("requesterId");
+                ClientHandler reqH = activeClients.get(requesterId);
+                if (reqH != null) {
+                    reqH.sendExternalMessage(msg);  // forward verbatim
+                } else {
+                    System.out.println("ClientHandler: requester " + requesterId
+                            + " not online; dropping PERMIT/DENY");
+                }
+                break;
+            }
+
             case UPLOAD:
                 FileManager.handleUpload(msg, clientId, output);
                 break;
@@ -285,5 +327,10 @@ public class ClientHandler implements Runnable {
      */
     public void sendExternalMessage(Message msg) {
         sendMessage(msg);
+    }
+
+    private void sendExternalTo(String targetId, Message m) {
+        ClientHandler h = activeClients.get(targetId);
+        if (h != null) h.sendExternalMessage(m);
     }
 }

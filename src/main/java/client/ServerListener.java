@@ -4,115 +4,102 @@ import java.io.ObjectInputStream;
 import java.io.IOException;
 import java.io.File;
 import java.io.FileWriter;
+import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
+import common.Util;
 
 /**
  * Listens for incoming messages from the server and dispatches
  * actions such as authentication handling, follow requests,
  * search responses, and file transfer events.
+ *
+ * Now queues ASK requests in ServerConnection instead of blocking
+ * on console input.
  */
 public class ServerListener implements Runnable {
 
-    private ObjectInputStream input;
-    private ServerConnection connection;
+    private final ObjectInputStream input;
+    private final ServerConnection connection;
     private ProfileClientManager profileClientManager;
     private String lastDownloadFileName = null;
+    private List<String> lastOwners = new ArrayList<>();
+    private String lastLang;
 
-    /**
-     * Constructs a ServerListener with the given input stream and connection.
-     *
-     * @param input      the ObjectInputStream for receiving Message objects
-     * @param connection the ServerConnection to use for sending replies
-     */
     public ServerListener(ObjectInputStream input, ServerConnection connection) {
-        this.input = input;
+        this.input      = input;
         this.connection = connection;
     }
 
-    /**
-     * Continuously reads Message objects from the server and handles
-     * them based on their MessageType, including auth, follow,
-     * search, notifications, and file transfer events.
-     */
     @Override
     public void run() {
         try {
             Message msg;
             while ((msg = (Message) input.readObject()) != null) {
-                // Handle authentication success
+
                 if (msg.getType() == MessageType.AUTH_SUCCESS) {
                     connection.setClientId(msg.getSenderId());
                     profileClientManager = new ProfileClientManager(msg.getSenderId());
                     System.out.println(msg.getPayload());
                     continue;
                 }
-                // Handle authentication failure
                 if (msg.getType() == MessageType.AUTH_FAILURE) {
                     System.out.println(msg.getPayload());
                     continue;
                 }
-                // Handle listing followers response
                 if (msg.getType() == MessageType.LIST_FOLLOWERS_RESPONSE) {
-                    String payload = msg.getPayload();
-                    if (payload.isEmpty()) {
-                        System.out.println("You have no followers.");
-                    } else {
-                        System.out.println("Followers: " + payload);
-                    }
+                    String p = msg.getPayload();
+                    System.out.println(p.isEmpty() ? "You have no followers." : "Followers: " + p);
                     continue;
                 }
-                // Handle listing following response
                 if (msg.getType() == MessageType.LIST_FOLLOWING_RESPONSE) {
-                    String payload = msg.getPayload();
-                    if (payload.isEmpty()) {
-                        System.out.println("You are not following anyone.");
-                    } else {
-                        System.out.println("Following: " + payload);
-                    }
+                    String p = msg.getPayload();
+                    System.out.println(p.isEmpty() ? "You are not following anyone." : "Following: " + p);
                     continue;
                 }
-                // Handle diagnostic messages (search, captions, repost sync, notifications)
+
+                /* ── Phase-B gated download ── */
+                if (msg.getType() == MessageType.ASK) {
+                    // Instead of prompting here, queue the payload for CommandHandler
+                    connection.queuePendingAsk(msg.getPayload());
+                    System.out.println("\n>>> You have a download request pending. " +
+                            "Type 'yes' or 'no'.");
+                    continue;
+                }
+                if (msg.getType() == MessageType.PERMIT) {
+                    handlePermit(msg);
+                    continue;
+                }
+                if (msg.getType() == MessageType.DENY) {
+                    handleDeny(msg);
+                    continue;
+                }
+
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
-
-                    // New search handling:
                     if (p.startsWith("Search: found photo ")) {
                         System.out.println(p);
                         String[] parts = p.split(" at: ");
-                        if (parts.length == 2) {
-                            // filename without the " (en)" suffix
-                            String raw = parts[0].substring("Search: found photo ".length());
-                            int idx = raw.indexOf(" (");
-                            String file = (idx == -1 ? raw : raw.substring(0, idx)).trim();
+                        String raw = parts[0].substring("Search: found photo ".length());
+                        int idx = raw.indexOf(" (");
+                        String file = (idx == -1 ? raw : raw.substring(0, idx)).trim();
 
-                            // pick a random "id(username)" token
-                            String[] owners = parts[1].split(",");
-                            int ri = new java.util.Random().nextInt(owners.length);
-                            String token = owners[ri].trim();          // e.g. "2(makis)"
-
-                            // NEW: extract the username between '(' and ')'
-                            String ownerName = token.substring(
-                                    token.indexOf('(') + 1,
-                                    token.indexOf(')')
-                            );
-
-                            System.out.println("Initiating download of " + file + " from user " + ownerName);
-                            lastDownloadFileName = file;
-
-                            // build payload with username, not numeric ID
-                            String lang = connection.getLanguagePref();
-                            String downloadPayload = "lang:" + lang
-                                    + "|ownerFilename:" + ownerName + ":" + file;
-
-                            connection.sendMessage(new Message(
-                                    MessageType.DOWNLOAD,
-                                    connection.getClientId(),
-                                    downloadPayload
-                            ));
-                            FileTransferHandler.downloadFile(downloadPayload, connection);
+                        // record owners & context
+                        lastOwners.clear();
+                        for (String tok : parts[1].split(",")) {
+                            String nm = tok.substring(tok.indexOf('(')+1, tok.indexOf(')'));
+                            lastOwners.add(nm);
                         }
+                        lastDownloadFileName = file;
+                        lastLang = connection.getLanguagePref();
+
+                        // send initial ASK
+                        String owner = lastOwners.get((int)(Math.random()*lastOwners.size()));
+                        System.out.println("Initiating ASK to " + owner);
+                        sendAsk(owner, file, lastLang);
                         continue;
                     }
                     if (p.startsWith("Search: no followees")) {
@@ -120,8 +107,7 @@ public class ServerListener implements Runnable {
                         continue;
                     }
                     if (p.startsWith("Caption: ")) {
-                        String captionText = p.substring("Caption: ".length());
-                        saveCaptionFile(captionText);
+                        saveCaptionFile(p.substring("Caption: ".length()));
                         continue;
                     }
                     if (p.equals("No caption available")) {
@@ -129,9 +115,8 @@ public class ServerListener implements Runnable {
                         continue;
                     }
                     if (p.startsWith("SYNC_REPOST:")) {
-                        String entry = p.substring("SYNC_REPOST:".length());
-                        profileClientManager.appendRepost(entry);
-                        System.out.println("Local Others file updated with repost: " + entry);
+                        profileClientManager.appendRepost(p.substring("SYNC_REPOST:".length()));
+                        System.out.println("Local Others updated with repost: " + p);
                         continue;
                     }
                     if (p.startsWith("Notification:")) {
@@ -143,41 +128,74 @@ public class ServerListener implements Runnable {
                         System.out.println(p);
                     }
                 }
-                // Handle follow request notifications
+
                 if (msg.getType() == MessageType.FOLLOW_REQUEST) {
-                    String[] parts = msg.getPayload().split(":", 2);
-                    String requesterUsername = parts[0];
-                    System.out.println("\n>>> User '" + requesterUsername + "' wants to follow you.");
-                    System.out.println("    Type: respondfollow " + requesterUsername + ":<accept|reject|reciprocate>");
+                    String[] pr = msg.getPayload().split(":",2);
+                    System.out.println("\n>>> User '" + pr[0] + "' wants to follow you.");
+                    System.out.println("    Type: respondfollow " + pr[0] + ":<accept|reject|reciprocate>");
                     System.out.print("> ");
                     continue;
                 }
-                // Handle file transfer protocol messages
+
                 if (msg.getType() == MessageType.HANDSHAKE
                         || msg.getType() == MessageType.FILE_CHUNK
                         || msg.getType() == MessageType.FILE_END
                         || msg.getType() == MessageType.NACK) {
+
                     if (msg.getType() == MessageType.HANDSHAKE) {
                         String hs = msg.getPayload();
                         int idx = hs.indexOf("for ");
                         if (idx != -1) {
+                            // ◀── Record filename again in case someone bypassed PERMIT path
                             lastDownloadFileName = hs.substring(idx + 4).trim();
                         }
                     }
                     FileTransferHandler.handleIncomingMessage(msg, connection);
                 }
+
             }
         } catch (IOException | ClassNotFoundException e) {
             System.out.println("Disconnected from server.");
         }
     }
 
+    private void sendAsk(String owner, String file, String lang) {
+        String payload = "requesterId:"   + connection.getClientId()
+                + "|ownerUsername:" + owner
+                + "|file:"          + file
+                + "|lang:"          + lang;
+        connection.sendMessage(new Message(MessageType.ASK, connection.getClientId(), payload));
+    }
+
     /**
-     * Saves the caption text for the last downloaded file to a .txt file
-     * in the client-specific directory.
-     *
-     * @param captionText the caption content to save; empty string if none
+     * Requester-side: on PERMIT, emit DOWNLOAD and invoke the
+     * existing FileTransferHandler.  (Runs only on the requester client.)
      */
+    private void handlePermit(Message permit) {
+        Map<String,String> m = Util.parsePayload(permit.getPayload());
+        String owner = m.get("ownerUsername");
+        String file  = m.get("file");
+        String lang  = m.get("lang");
+
+        // ◀── Record filename here so caption saving knows where to write
+        lastDownloadFileName = file;
+
+        String dlPayload = "lang:" + lang
+                + "|ownerFilename:" + owner + ":" + file;
+
+        connection.sendMessage(new Message(
+                MessageType.DOWNLOAD,
+                connection.getClientId(),
+                dlPayload));
+        FileTransferHandler.downloadFile(dlPayload, connection);
+    }
+
+
+    private void handleDeny(Message deny) {
+        System.out.println("Download denied – " + deny.getPayload());
+        // No further action here—CommandHandler will now drive retries
+    }
+
     private void saveCaptionFile(String captionText) {
         if (lastDownloadFileName == null) {
             System.out.println("Warning: no filename recorded for caption; skipping save.");
@@ -192,13 +210,13 @@ public class ServerListener implements Runnable {
             File dir = new File("ClientFiles/" + Constants.GROUP_ID + "client" + clientId);
             if (!dir.exists()) dir.mkdirs();
 
-            File captionFile = new File(dir, base + ".txt");
-            try (FileWriter fw = new FileWriter(captionFile)) {
+            File cf = new File(dir, base + ".txt");
+            try (FileWriter fw = new FileWriter(cf)) {
                 fw.write(captionText);
             }
-            System.out.println("FileTransferHandler: Caption saved to " + captionFile.getPath());
+            System.out.println("Caption saved to " + cf.getPath());
         } catch (IOException e) {
-            System.out.println("Error saving caption file: " + e.getMessage());
+            System.out.println("Error saving caption: " + e.getMessage());
         }
     }
 }

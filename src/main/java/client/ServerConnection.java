@@ -3,12 +3,15 @@ package client;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import common.Constants;
 import java.io.IOException;
+
+import common.Constants;
 
 /**
  * Manages the persistent connection between the client and server,
  * handling socket creation, message sending, and client identification.
+ *
+ * Also tracks any pending ASK request for explicit owner approval.
  */
 public class ServerConnection {
     private Socket socket;
@@ -19,6 +22,9 @@ public class ServerConnection {
 
     // NEW: store the user's language preference (default to English)
     private String languagePref = "en";
+
+    // NEW: pending ASK payload awaiting owner decision
+    private String pendingAskPayload = null;
 
     /**
      * Establishes a socket connection to the server and starts
@@ -92,5 +98,37 @@ public class ServerConnection {
      */
     public void setLanguagePref(String languagePref) {
         this.languagePref = languagePref;
+    }
+
+    // ────────────────────────── Pending ASK logic ──────────────────────────
+
+    /**
+     * Queues an ASK payload for explicit owner approval.
+     * The next console input will be interpreted as the decision.
+     *
+     * @param askPayload the raw payload string of the ASK message
+     */
+    public synchronized void queuePendingAsk(String askPayload) {
+        this.pendingAskPayload = askPayload;
+    }
+
+    /**
+     * Returns and clears the pending ASK payload.
+     *
+     * @return the queued ASK payload, or null if none was pending
+     */
+    public synchronized String consumePendingAsk() {
+        String tmp = pendingAskPayload;
+        pendingAskPayload = null;
+        return tmp;
+    }
+
+    /**
+     * Indicates whether there is an ASK awaiting the owner's decision.
+     *
+     * @return true if an ASK is pending, false otherwise
+     */
+    public synchronized boolean hasPendingAsk() {
+        return pendingAskPayload != null;
     }
 }

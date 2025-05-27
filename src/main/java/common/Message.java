@@ -24,7 +24,9 @@ public class Message implements Serializable {
         HANDSHAKE, ACK, NACK, DIAGNOSTIC,
         FILE_CHUNK, FILE_END,
         AUTH_SUCCESS, AUTH_FAILURE,
-        REPOST, COMMENT
+        REPOST, COMMENT,
+        // Phase B gated download flow
+        ASK, PERMIT, DENY
     }
 
     /** Type of this message. */

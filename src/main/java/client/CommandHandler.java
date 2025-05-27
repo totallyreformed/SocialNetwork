@@ -49,9 +49,39 @@ public class CommandHandler {
             System.out.print("> ");
             String input = scanner.nextLine().trim();
             if (input.equalsIgnoreCase("exit")) break;
+
+            // NEW: if there's an ASK pending, handle it before normal commands
+            if (connection.hasPendingAsk()) {
+                handleAskResponse(input);
+                continue;
+            }
+
             processCommand(input);
         }
         scanner.close();
+    }
+
+    /**
+     * Handles the user's response to a pending ASK (yes/no), sending
+     * PERMIT or DENY back to the server.
+     *
+     * @param response the line the user entered
+     */
+    private void handleAskResponse(String response) {
+        String resp = response.toLowerCase();
+        if (!resp.equals("yes") && !resp.equals("no")) {
+            System.out.println("Please type 'yes' or 'no'.");
+            return;
+        }
+        String askPayload = connection.consumePendingAsk();
+        MessageType reply = resp.equals("yes")
+                ? MessageType.PERMIT
+                : MessageType.DENY;
+        connection.sendMessage(new Message(
+                reply,
+                connection.getClientId(),
+                askPayload));
+        System.out.println("You chose to " + reply + " download request.");
     }
 
     /**
@@ -128,16 +158,30 @@ public class CommandHandler {
                 processUploadCommand(payload, connection.getClientId());
                 break;
 
-            case "download":
-                if (payload.contains(":")) {
-                    // Include language preference
-                    String combined = "lang:" + languagePref + "|ownerFilename:" + payload;
-                    connection.sendMessage(new Message(MessageType.DOWNLOAD, connection.getClientId(), combined));
-                    FileTransferHandler.downloadFile(combined, connection);
-                } else {
-                    System.out.println("Download command format invalid. Usage: download ownerName:filename");
+            case "download": {                                     // Phase-B
+                if (!payload.contains(":")) {
+                    System.out.println("Format: download <owner>:<filename>");
+                    break;
                 }
+                parts = payload.split(":", 2);
+                String owner = parts[0].trim();
+                String file  = parts[1].trim();
+
+                String askPayload =
+                        "requesterId:"   + connection.getClientId()
+                                + "|ownerUsername:" + owner
+                                + "|file:"         + file
+                                + "|lang:"         + languagePref;
+
+                connection.sendMessage(new Message(
+                        MessageType.ASK,
+                        connection.getClientId(),
+                        askPayload));
+
+                System.out.println("Sent ASK to " + owner
+                        + " for " + file + " (" + languagePref + ")");
                 break;
+            }
 
             case "search":
                 // MODIFIED to include language preference
