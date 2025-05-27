@@ -382,6 +382,9 @@ public class FileManager {
                     .computeIfAbsent(photoName, k -> ConcurrentHashMap.newKeySet())
                     .add(downloaderId);
 
+            // 10) Record the download in statistics
+            DownloadStatisticsManager.recordDownload(photoName, downloaderId);
+
         } catch (ClassNotFoundException ex) {
             ex.printStackTrace();
         }

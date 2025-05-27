@@ -7,38 +7,40 @@ import java.net.Socket;
 import java.io.IOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.Scanner;
 
-/**
- * Entry point for the server application that initializes the thread pool,
- * starts the directory watcher, loads the social graph, and accepts client connections.
- */
 public class ServerMain {
 
-    /**
-     * ExecutorService to manage client handler threads.
-     */
     private ExecutorService threadPool;
 
-    /**
-     * Constructs a ServerMain, initializing a fixed-size thread pool
-     * according to the configured maximum client threads.
-     */
     public ServerMain() {
         threadPool = Executors.newFixedThreadPool(Constants.MAX_CLIENT_THREADS);
     }
 
-    /**
-     * Starts the server by launching the DirectoryWatcher thread, binding to the server port,
-     * loading the initial social graph, and continuously accepting incoming client connections.
-     * Each new connection is handled by a ClientHandler submitted to the thread pool.
-     *
-     * @throws IOException if an I/O error occurs when opening the server socket
-     */
     public void startServer() throws IOException {
         // Start the directory watcher in its own thread.
         Thread watcherThread = new Thread(new DirectoryWatcher("ServerFiles"));
         watcherThread.start();
         System.out.println(Util.getTimestamp() + " ServerMain: DirectoryWatcher started for 'ServerFiles' directory.");
+
+        // Register shutdown hook as a fallback (in case someone kills the JVM normally)
+        Runtime.getRuntime().addShutdownHook(new Thread(DownloadStatisticsManager::printReport));
+
+        // Start a console‐command listener to allow "shutdown" or "exit"
+        Thread consoleThread = new Thread(() -> {
+            Scanner scanner = new Scanner(System.in);
+            System.out.println("Type 'shutdown' or 'exit' to stop the server and print statistics.");
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim().toLowerCase();
+                if (line.equals("shutdown") || line.equals("exit")) {
+                    System.out.println("ServerMain: Shutdown command received.");
+                    DownloadStatisticsManager.printReport();
+                    System.exit(0);
+                }
+            }
+        }, "ConsoleListener");
+        consoleThread.setDaemon(true);
+        consoleThread.start();
 
         try (ServerSocket serverSocket = new ServerSocket(Constants.SERVER_PORT)) {
             System.out.println(Util.getTimestamp() + " ServerMain: Server started on port " + Constants.SERVER_PORT);
@@ -59,12 +61,6 @@ public class ServerMain {
         }
     }
 
-    /**
-     * Main method to launch the server application.
-     *
-     * @param args command-line arguments (not used)
-     * @throws IOException if the server socket cannot be opened
-     */
     public static void main(String[] args) throws IOException {
         ServerMain server = new ServerMain();
         server.startServer();
