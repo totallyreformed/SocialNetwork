@@ -38,6 +38,10 @@ public class ClientHandler implements Runnable {
      */
     public static ConcurrentHashMap<String, String> clientAddressMap = new ConcurrentHashMap<>();
 
+    /* ───────── Phase-B: guard against concurrent pending requests ───────── */
+    private static final ConcurrentHashMap<String, Boolean> pendingDownload = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Boolean> pendingComment  = new ConcurrentHashMap<>();
+
     /**
      * Constructs a new handler for the given client socket and logs its creation.
      *
@@ -67,10 +71,12 @@ public class ClientHandler implements Runnable {
         } catch (IOException | ClassNotFoundException e) {
             System.out.println("ClientHandler: Error or disconnection: " + e.getMessage());
         } finally {
-            // Clean up registry entries on disconnect
+            // Clean up registry and pending-lock entries on disconnect
             if (clientId != null) {
                 activeClients.remove(clientId);
                 clientAddressMap.remove(clientId);
+                pendingDownload.remove(clientId);
+                pendingComment.remove(clientId);
                 System.out.println("ClientHandler: Removed client " + clientId + " from registry");
             }
             try {
@@ -168,39 +174,51 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
-            /* ========== Phase-B ASK/PERMIT/DENY ========== */
+            /* ========== ASK / PERMIT / DENY (single-pending guard) ========== */
             case ASK: {
                 Map<String,String> m = Util.parsePayload(msg.getPayload());
                 String ownerUsername = m.get("ownerUsername");
-                String ownerId = AuthenticationManager.getClientIdByUsername(ownerUsername);
+                String ownerId       = AuthenticationManager.getClientIdByUsername(ownerUsername);
 
-                if (ownerId == null) {                // no such user
+                if (ownerId == null) {                                  // no such user
+                    /* keep key/value layout so client can parse */
                     sendExternalTo(msg.getSenderId(), new Message(
                             MessageType.DENY, "Server",
-                            "User '" + ownerUsername + "' not found"));
+                            msg.getPayload() + "|reason:not-found"));
+                    return;
+                }
+                /* allow only one simultaneous download request per owner */
+                if (pendingDownload.putIfAbsent(ownerId, Boolean.TRUE) != null) {
+                    sendExternalTo(msg.getSenderId(), new Message(
+                            MessageType.DENY, "Server",
+                            msg.getPayload() + "|reason:busy"));
                     return;
                 }
                 ClientHandler ownerHandler = activeClients.get(ownerId);
-                if (ownerHandler == null) {           // owner offline
+                if (ownerHandler == null) {                             // owner offline
+                    pendingDownload.remove(ownerId);                    // clear lock
                     sendExternalTo(msg.getSenderId(), new Message(
                             MessageType.DENY, "Server",
-                            "Owner '" + ownerUsername + "' is offline"));
+                            msg.getPayload() + "|reason:offline"));
                     return;
                 }
                 ownerHandler.sendExternalMessage(new Message(
                         MessageType.ASK,
-                        msg.getSenderId(),          // preserve requesterID
-                        msg.getPayload()));         // unchanged payload
+                        msg.getSenderId(),
+                        msg.getPayload()));
                 break;
             }
 
             case PERMIT:
             case DENY: {
+                /* when the owner replies, free the lock */
+                pendingDownload.remove(msg.getSenderId());
+
                 Map<String,String> m = Util.parsePayload(msg.getPayload());
-                String requesterId = m.get("requesterId");
-                ClientHandler reqH = activeClients.get(requesterId);
+                String requesterId   = m.get("requesterId");
+                ClientHandler reqH   = activeClients.get(requesterId);
                 if (reqH != null) {
-                    reqH.sendExternalMessage(msg);  // forward verbatim
+                    reqH.sendExternalMessage(msg);
                 } else {
                     System.out.println("ClientHandler: requester " + requesterId
                             + " not online; dropping PERMIT/DENY");
@@ -260,28 +278,40 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
+            /* ========== Comment handshake (single-pending guard) ========== */
             case ASK_COMMENT: {
-                Map<String,String> m=Util.parsePayload(msg.getPayload());
-                String ownerUser=m.get("ownerUsername");
-                String ownerId=AuthenticationManager.getClientIdByUsername(ownerUser);
-                if(ownerId==null||!activeClients.containsKey(ownerId)){
+                Map<String,String> m = Util.parsePayload(msg.getPayload());
+                String ownerUser = m.get("ownerUsername");
+                String ownerId   = AuthenticationManager.getClientIdByUsername(ownerUser);
+
+                if (ownerId == null || !activeClients.containsKey(ownerId)) {
                     sendExternalTo(msg.getSenderId(), new Message(
-                            MessageType.DENY_COMMENT,"Server",
-                            "User '"+ownerUser+"' not available"));
-                } else {
-                    activeClients.get(ownerId).sendExternalMessage(
-                            new Message(MessageType.ASK_COMMENT,
-                                    msg.getSenderId(),
-                                    msg.getPayload()));
+                            MessageType.DENY_COMMENT, "Server",
+                            msg.getPayload() + "|reason:not-available"));
+                    return;
                 }
+                if (pendingComment.putIfAbsent(ownerId, Boolean.TRUE) != null) {
+                    sendExternalTo(msg.getSenderId(), new Message(
+                            MessageType.DENY_COMMENT, "Server",
+                            msg.getPayload() + "|reason:busy"));
+                    return;
+                }
+                activeClients.get(ownerId).sendExternalMessage(new Message(
+                        MessageType.ASK_COMMENT,
+                        msg.getSenderId(),
+                        msg.getPayload()));
                 break;
             }
+
             case APPROVE_COMMENT:
             case DENY_COMMENT: {
-                Map<String,String> m=Util.parsePayload(msg.getPayload());
-                String rid=m.get("requesterId");
-                ClientHandler ch=activeClients.get(rid);
-                if(ch!=null) ch.sendExternalMessage(msg);
+                /* owner responded – release comment lock */
+                pendingComment.remove(msg.getSenderId());
+
+                Map<String,String> m = Util.parsePayload(msg.getPayload());
+                String rid          = m.get("requesterId");
+                ClientHandler ch    = activeClients.get(rid);
+                if (ch != null) ch.sendExternalMessage(msg);
                 break;
             }
             case COMMENT: {

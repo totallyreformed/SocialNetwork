@@ -209,8 +209,6 @@ public class ProfileManager {
             return;
         }
 
-        try { Thread.sleep(10000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-
         String commenterName = AuthenticationManager.getUsernameByNumericId(commenterId);
 
         // Ensure server-side per-client directory exists
