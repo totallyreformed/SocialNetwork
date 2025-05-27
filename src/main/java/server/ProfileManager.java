@@ -70,7 +70,7 @@ public class ProfileManager {
                 try {
                     handler.getOutputStream().writeObject(
                             new Message(MessageType.DIAGNOSTIC, "Server",
-                                    "Profile locked by another client. Please retry later."));
+                                    "Profile locked—please retry later"));
                     handler.getOutputStream().flush();
                 } catch (IOException ignored) { }
             }
@@ -115,6 +115,8 @@ public class ProfileManager {
 
     /**
      * Releases the lock on the given profile and notifies the next waiting client.
+     * Automatically grants the lock to that client.
+     *
      * @param clientId the profile owner ID
      */
     public synchronized void unlockProfile(String clientId) {
@@ -127,12 +129,16 @@ public class ProfileManager {
         Queue<String> q = waitingQueues.get(clientId);
         if (q != null && !q.isEmpty()) {
             String next = q.poll();
+            // Automatically acquire lock for next client
+            lockProfile(clientId, next);
+
+            // Notify next that the profile is available
             ClientHandler handler = ClientHandler.activeClients.get(next);
             if (handler != null) {
                 try {
                     handler.getOutputStream().writeObject(
                             new Message(MessageType.DIAGNOSTIC, "Server",
-                                    "Profile " + clientId + " is now available."));
+                                    "Profile is now available"));
                     handler.getOutputStream().flush();
                 } catch (IOException ignored) { }
             }
@@ -202,6 +208,8 @@ public class ProfileManager {
                     + " ProfileManager: Unable to lock profile " + targetId + " for commenting.");
             return;
         }
+
+        try { Thread.sleep(10000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
 
         String commenterName = AuthenticationManager.getUsernameByNumericId(commenterId);
 

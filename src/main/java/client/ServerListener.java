@@ -91,6 +91,16 @@ public class ServerListener implements Runnable {
                     continue;
                 }
 
+                // ── Handle SYNC_REPOST instruction ──
+                if (msg.getType() == MessageType.DIAGNOSTIC &&
+                        msg.getPayload().startsWith("SYNC_REPOST:")) {
+                    String entry = msg.getPayload().substring("SYNC_REPOST:".length());
+                    // Append into local Others file
+                    profileClientManager.appendRepost(entry);
+                    System.out.println("Repost synchronized locally: " + entry);
+                    continue;
+                }
+
                 // ── File transfer & other DIAGNOSTICs ──
                 if (msg.getType() == MessageType.DIAGNOSTIC) {
                     String p = msg.getPayload();
