@@ -190,10 +190,33 @@ public class ServerListener implements Runnable {
         FileTransferHandler.downloadFile(dlPayload, connection);
     }
 
-
+    /**
+     * Requester-side: on DENY, initialize retry context and prompt user
+     * to retry with the same or another owner.
+     */
     private void handleDeny(Message deny) {
         System.out.println("Download denied – " + deny.getPayload());
-        // No further action here—CommandHandler will now drive retries
+
+        // Parse payload to get owner, file, lang
+        Map<String,String> m = Util.parsePayload(deny.getPayload());
+        String file = m.get("file");
+        String lang = m.get("lang");
+        String owner = m.get("ownerUsername");
+
+        // Build retry owner list: use prior lastOwners if available,
+        // otherwise fall back to the single original owner.
+        List<String> owners = new ArrayList<>();
+        if (lastOwners.isEmpty()) {
+            owners.add(owner);
+        } else {
+            owners.addAll(lastOwners);
+        }
+
+        // Initialize retry state in connection
+        connection.initRetry(owners, lang, file);
+
+        // Prompt the user to retry
+        System.out.print("Retry download? (yes/no): ");
     }
 
     private void saveCaptionFile(String captionText) {

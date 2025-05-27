@@ -1,6 +1,7 @@
 package client;
 
 import java.util.Scanner;
+import java.util.List;               // ← added
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
@@ -56,6 +57,12 @@ public class CommandHandler {
                 continue;
             }
 
+            // NEW: if we're in retry-on-denial state, handle retry flow
+            if (connection.getRetryState() != ServerConnection.RetryState.NONE) {
+                handleRetryFlow(input);
+                continue;
+            }
+
             processCommand(input);
         }
         scanner.close();
@@ -82,6 +89,91 @@ public class CommandHandler {
                 connection.getClientId(),
                 askPayload));
         System.out.println("You chose to " + reply + " download request.");
+    }
+
+    /**
+     * Handles retry-on-denial interactions: retry? same owner? or pick another.
+     *
+     * @param input the user’s console input
+     */
+    private void handleRetryFlow(String input) {
+        String resp = input.toLowerCase();
+        ServerConnection.RetryState state = connection.getRetryState();
+        switch (state) {
+            case AWAIT_RETRY_CONFIRM:
+                if (!resp.equals("yes") && !resp.equals("no")) {
+                    System.out.println("Please type 'yes' or 'no'.");
+                    return;
+                }
+                if (resp.equals("no")) {
+                    connection.clearRetry();
+                    return;
+                }
+                // yes → ask same or different
+                connection.setRetryState(ServerConnection.RetryState.AWAIT_SAME_CONFIRM);
+                System.out.print("Use same owner? (yes/no): ");
+                break;
+
+            case AWAIT_SAME_CONFIRM:
+                if (!resp.equals("yes") && !resp.equals("no")) {
+                    System.out.println("Please type 'yes' or 'no'.");
+                    return;
+                }
+                List<String> owners = connection.getRetryOwners();
+                if (resp.equals("yes") || owners.size() == 1) {
+                    sendRetryAsk(owners.get(0));
+                    connection.clearRetry();
+                } else {
+                    System.out.println("Available owners:");
+                    for (int i = 0; i < owners.size(); i++) {
+                        System.out.printf("  %d) %s%n", i+1, owners.get(i));
+                    }
+                    connection.setRetryState(ServerConnection.RetryState.AWAIT_SELECTION);
+                    System.out.print("Select owner number: ");
+                }
+                break;
+
+            case AWAIT_SELECTION:
+                int pick;
+                try {
+                    pick = Integer.parseInt(resp);
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid number.");
+                    System.out.print("Select owner number: ");
+                    return;
+                }
+                List<String> opts = connection.getRetryOwners();
+                if (pick < 1 || pick > opts.size()) {
+                    System.out.println("Choice out of range.");
+                    System.out.print("Select owner number: ");
+                    return;
+                }
+                sendRetryAsk(opts.get(pick-1));
+                connection.clearRetry();
+                break;
+
+            default:
+                connection.clearRetry();
+        }
+    }
+
+    /**
+     * Sends a new ASK for the given owner using stored retry context.
+     *
+     * @param owner the username to retry against
+     */
+    private void sendRetryAsk(String owner) {
+        String file = connection.getRetryFile();
+        String lang = connection.getRetryLang();
+        String askPayload = "requesterId:"   + connection.getClientId()
+                + "|ownerUsername:" + owner
+                + "|file:"          + file
+                + "|lang:"          + lang;
+        connection.sendMessage(new Message(
+                MessageType.ASK,
+                connection.getClientId(),
+                askPayload));
+        System.out.println("Retrying download of '" + file + "' from user " + owner);
     }
 
     /**
