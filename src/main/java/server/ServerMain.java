@@ -52,7 +52,6 @@ public class ServerMain {
                 String line = scanner.nextLine().trim().toLowerCase();
                 if (line.equals("shutdown") || line.equals("exit")) {
                     System.out.println("ServerMain: Shutdown command received.");
-                    DownloadStatisticsManager.printReport();
                     System.exit(0);
                 }
             }
