@@ -47,6 +47,25 @@ public class ServerListener implements Runnable {
                     continue;
                 }
 
+                if (msg.getType() == MessageType.LIST_FOLLOWERS_RESPONSE) {
+                    String p = msg.getPayload();
+                    System.out.println(p.isEmpty() ? "You have no followers." : "Followers: " + p);
+                    continue;
+                }
+                if (msg.getType() == MessageType.LIST_FOLLOWING_RESPONSE) {
+                    String p = msg.getPayload();
+                    System.out.println(p.isEmpty() ? "You are not following anyone." : "Following: " + p);
+                    continue;
+                }
+
+                if (msg.getType() == MessageType.FOLLOW_REQUEST) {
+                    String[] pr = msg.getPayload().split(":", 2);
+                    System.out.println("\n>>> User '" + pr[0] + "' wants to follow you.");
+                    System.out.println("    Type: respondfollow " + pr[0] + ":<accept|reject|reciprocate>");
+                    System.out.print("> ");
+                    continue;
+                }
+
                 // ── Download handshake ──
                 if (msg.getType() == MessageType.ASK) {
                     connection.queuePendingAsk(msg.getPayload());
