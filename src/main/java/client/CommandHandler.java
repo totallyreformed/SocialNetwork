@@ -1,7 +1,7 @@
 package client;
 
 import java.util.Scanner;
-import java.util.List;               // ← added
+import java.util.List;
 import common.Message;
 import common.Message.MessageType;
 import common.Constants;
@@ -19,15 +19,11 @@ import java.util.Base64;
  */
 public class CommandHandler {
 
-    /**
-     * Connection to the server for sending and receiving messages.
-     */
+    /** Connection to the server for sending and receiving messages. */
     private ServerConnection connection;
 
-    /**
-     * The client’s preferred caption language ("en" or "gr").
-     */
-    private String languagePref;   // NEW
+    /** The client’s preferred caption language ("en" or "gr"). */
+    private String languagePref;
 
     /**
      * Constructs a CommandHandler with the given server connection.
@@ -49,7 +45,9 @@ public class CommandHandler {
         while (true) {
             System.out.print("> ");
             String input = scanner.nextLine().trim();
-            if (input.equalsIgnoreCase("exit")) break;
+            if (input.equalsIgnoreCase("exit")) {
+                break;
+            }
 
             // download ask/permit/deny
             if (connection.hasPendingAsk()) {
@@ -73,7 +71,7 @@ public class CommandHandler {
     }
 
     /**
-     * Handles the user's response to a pending ASK (yes/no), sending
+     * Handles the user's response to a pending download ASK (yes/no), sending
      * PERMIT or DENY back to the server.
      *
      * @param response the line the user entered
@@ -180,6 +178,12 @@ public class CommandHandler {
         System.out.println("Retrying download of '" + file + "' from user " + owner);
     }
 
+    /**
+     * Handles the user's response to a pending comment ASK (yes/no), sending
+     * APPROVE_COMMENT or DENY_COMMENT back to the server.
+     *
+     * @param response the line the user entered
+     */
     private void handleCommentAskResponse(String response) {
         String resp = response.toLowerCase();
         if (!resp.equals("yes") && !resp.equals("no")) {
@@ -418,7 +422,7 @@ public class CommandHandler {
         }
     }
 
-    // ────── NEW METHODS ──────
+    // ────── NEW METHODS FOR PHASE B ──────
 
     /**
      * Loads the saved language preference from disk or defaults to English.
@@ -459,5 +463,4 @@ public class CommandHandler {
             System.err.println("Failed to save language preference: " + e.getMessage());
         }
     }
-
 }

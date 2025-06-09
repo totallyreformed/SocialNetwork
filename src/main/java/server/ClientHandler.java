@@ -20,8 +20,10 @@ public class ClientHandler implements Runnable {
 
     /** The client socket for network communication. */
     private Socket clientSocket;
+
     /** Stream for receiving messages from the client. */
     private ObjectInputStream input;
+
     /** Stream for sending messages to the client. */
     private ObjectOutputStream output;
 

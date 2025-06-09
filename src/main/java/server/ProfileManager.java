@@ -29,6 +29,7 @@ public class ProfileManager {
     private ConcurrentHashMap<String, Boolean> locks = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, String> lockOwners = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Queue<String>> waitingQueues = new ConcurrentHashMap<>();
+
     /** Timers to enforce lock timeouts and warnings. */
     private ConcurrentHashMap<String, Timer> timers = new ConcurrentHashMap<>();
 
